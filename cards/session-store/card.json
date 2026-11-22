@@ -1,0 +1,1 @@
+{ "name": "session-store", "description": "Saves chats, messages and token usage in a local SQLite file.", "dependencies": ["agent-loop"] }

@@ -1,0 +1,1 @@
+{ "name": "shell", "description": "Runs shell commands in the working folder, with background shells for long jobs.", "dependencies": ["agent-loop"] }

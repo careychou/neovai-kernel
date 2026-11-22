@@ -1,0 +1,1 @@
+{ "name": "agent-loop", "description": "Runs a conversation: calls the model, runs the tools it asks for, repeats until it answers.", "dependencies": [] }

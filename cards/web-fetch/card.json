@@ -1,0 +1,1 @@
+{ "name": "web-fetch", "description": "Fetches a web page and returns it as Markdown. Read-only.", "dependencies": ["agent-loop"] }

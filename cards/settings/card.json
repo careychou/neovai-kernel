@@ -1,0 +1,1 @@
+{ "name": "settings", "description": "Loads and saves model providers and limits, with API keys encrypted by the host app.", "dependencies": ["agent-loop", "model-providers"] }

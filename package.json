@@ -1,0 +1,21 @@
+{
+  "name": "neovai-kernel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reusable agent cards for Neovai apps: pick the cards an app needs and compose them.",
+  "type": "module",
+  "exports": {
+    "./cards/*": "./cards/*/index.ts",
+    "./compose": "./compose.ts"
+  },
+  "scripts": {
+    "test": "vitest run cards",
+    "test:regression": "vitest run tests/regression",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.12"
+  }
+}

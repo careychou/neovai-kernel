@@ -1,0 +1,1 @@
+{ "name": "approval", "description": "Asks the user before risky tools run, or approves everything when auto-approve is on.", "dependencies": ["agent-loop"] }
