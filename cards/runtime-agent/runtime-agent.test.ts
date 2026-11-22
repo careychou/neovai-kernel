@@ -80,6 +80,13 @@ describe('runtime agent', () => {
     expect(toolOutputs(requests[1])[1]).toContain('read-only')
   })
 
+  it('keeps read-only data files out of save_data', async () => {
+    const { makeSaveDataTool } = await import('./index')
+    const tool = makeSaveDataTool({ dir: path.join(ws, 'records/data'), locked: ['decisions'] })
+    await expect(tool.run({ name: 'decisions', data: {} }, {} as never)).rejects.toThrow('read-only')
+    await expect(tool.run({ name: 'today', data: {} }, {} as never)).resolves.toContain('today.json')
+  })
+
   it('refuses unknown jobs and a missing model', async () => {
     start([])
     await expect(rt.run('nope')).rejects.toThrow('No job named "nope". Available: daily.')

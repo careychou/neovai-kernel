@@ -1,7 +1,7 @@
 import * as React from 'react'
 import * as JsxRuntime from 'react/jsx-runtime'
 import { Component, useEffect, useState, type ComponentType, type ReactNode } from 'react'
-import { HOST_GLOBAL, direction, resolveData, show, type Alert, type Block, type Metric, type Recommendation, type Screen } from './screen'
+import { HOST_GLOBAL, dataDate, direction, recKey, resolveData, show, type Alert, type Block, type Decision, type DecisionRecord, type Metric, type Recommendation, type Screen } from './screen'
 import type { PanelResult } from './live'
 
 export type MarkdownView = ComponentType<{ text: string }>
@@ -15,6 +15,14 @@ export interface ScreenHost {
   runJob?: (job: string) => void
   stopJob?: (job: string) => void
   running?: string[]
+  /** One line on what a running job is doing now, for example the tool it is calling. */
+  runStep?: Record<string, string>
+  /** When each running job started (ms since epoch), for the elapsed time. */
+  runStarted?: Record<string, number>
+  /** The live activity of a running job, drawn under its run button. */
+  renderActivity?: (job: string) => ReactNode
+  /** Records accepting or declining a recommendation; null undoes it. Enables `decide` on recommendation blocks. */
+  decide?: (rec: Recommendation, decision: Decision | null) => void
   /** Latest report per job. */
   reports?: Record<string, { text: string; finished: string; status: string } | null>
   /** Extra props every code panel receives, for example the user's goals. */
@@ -97,6 +105,15 @@ const pick = <T,>(b: { data?: string; items?: T[] }, data: Record<string, unknow
   return Array.isArray(v) ? (v as T[]) : []
 }
 
+/** "Running 1m 05s · <what it is doing>", ticking every second. */
+function RunState({ step, started }: { step?: string; started?: number }) {
+  const [, setNow] = useState(0)
+  useEffect(() => { const t = setInterval(() => setNow((n) => n + 1), 1000); return () => clearInterval(t) }, [])
+  const secs = started ? Math.max(0, Math.round((Date.now() - started) / 1000)) : 0
+  const took = started ? ` ${secs >= 60 ? `${Math.floor(secs / 60)}m ` : ''}${String(secs % 60).padStart(secs >= 60 ? 2 : 1, '0')}s` : ''
+  return <span className="lu-runstate"><span className="lu-spin" />Running{took}{step ? ` · ${step}` : '…'}</span>
+}
+
 function Section({ title, children }: { title?: string; children: ReactNode }) {
   return <section className="lu-block">{title && <h3 className="lu-title">{title}</h3>}{children}</section>
 }
@@ -164,17 +181,38 @@ function BlockView({ b, host, tick }: { b: Block; host: ScreenHost; tick?: unkno
     }
     case 'recommendations': {
       const items = pick<Recommendation>(b, d)
+      const date = dataDate(d, b.data)
+      const made = new Map(((resolveData(d, 'decisions.items') as DecisionRecord[] | undefined) ?? []).map((x) => [x.id, x]))
       return (
         <Section title={b.title}>
           {items.length ? (
             <div className="lu-recs">
-              {items.map((r, i) => (
-                <div className="lu-rec" key={i}>
-                  <div className="lu-rechead"><b>{r.ticker}</b>{r.action && <span className="lu-action">{r.action}</span>}{r.confidence !== undefined && <span className="lu-conf">{show(r.confidence)}</span>}</div>
-                  {r.reason && <p>{r.reason}</p>}
-                  {(r.target !== undefined || r.stop !== undefined) && <small>Target {show(r.target)} · Stop {show(r.stop)}</small>}
-                </div>
-              ))}
+              {items.map((r, i) => {
+                const rec = { ...r, date: r.date ?? date, id: recKey(r, date) }
+                const done = made.get(rec.id)
+                return (
+                  <div className={`lu-rec${done ? ` lu-${done.decision}` : ''}`} key={i}>
+                    <div className="lu-rechead"><b>{r.ticker}</b>{r.action && <span className="lu-action">{r.action}</span>}{r.confidence !== undefined && <span className="lu-conf">{show(r.confidence)}</span>}</div>
+                    {r.reason && <p>{r.reason}</p>}
+                    {(r.entry !== undefined || r.target !== undefined || r.stop !== undefined) && <small>{r.entry !== undefined && `Entry ${show(r.entry)} · `}Target {show(r.target)} · Stop {show(r.stop)}</small>}
+                    {b.decide && host.decide && (
+                      <div className="lu-decide">
+                        {done ? (
+                          <>
+                            <span className={`lu-verdict lu-${done.decision}`}>{done.decision === 'accepted' ? 'Accepted' : 'Declined'} {new Date(done.at).toLocaleDateString()}</span>
+                            <button onClick={() => host.decide!(rec, null)}>Undo</button>
+                          </>
+                        ) : (
+                          <>
+                            <button className="primary" onClick={() => host.decide!(rec, 'accepted')}>Accept</button>
+                            <button onClick={() => host.decide!(rec, 'declined')}>Decline</button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           ) : <Empty />}
         </Section>
@@ -184,11 +222,16 @@ function BlockView({ b, host, tick }: { b: Block; host: ScreenHost; tick?: unkno
       const busy = host.running?.includes(b.job)
       const last = host.reports?.[b.job]
       return (
-        <div className="lu-run">
-          {busy
-            ? <button className="danger" onClick={() => host.stopJob?.(b.job)}>Stop</button>
-            : <button className="primary" onClick={() => host.runJob?.(b.job)} disabled={!host.runJob}>{b.label ?? `Run ${b.job}`}</button>}
-          <span className="lu-runstate">{busy ? 'Running…' : last ? `Last run ${new Date(last.finished).toLocaleString()}${last.status !== 'completed' ? ` (${last.status})` : ''}` : 'Not run yet'}</span>
+        <div className="lu-runbox">
+          <div className="lu-run">
+            {busy
+              ? <button className="danger" onClick={() => host.stopJob?.(b.job)}>Stop</button>
+              : <button className="primary" onClick={() => host.runJob?.(b.job)} disabled={!host.runJob}>{b.label ?? `Run ${b.job}`}</button>}
+            {busy
+              ? <RunState step={host.runStep?.[b.job]} started={host.runStarted?.[b.job]} />
+              : <span className="lu-runstate">{last ? `Last run ${new Date(last.finished).toLocaleString()}${last.status !== 'completed' ? ` (${last.status})` : ''}` : 'Not run yet'}</span>}
+          </div>
+          {busy && host.renderActivity && <div className="lu-activity">{host.renderActivity(b.job)}</div>}
         </div>
       )
     }

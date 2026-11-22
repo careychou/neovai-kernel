@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { compilePanel, createLiveUi, direction, HOST_GLOBAL, makeCheckUiTool, parseScreen, resolveData, show } from './index'
+import { compilePanel, createLiveUi, dataDate, direction, HOST_GLOBAL, makeCheckUiTool, parseScreen, recKey, resolveData, show } from './index'
 
 let ws: string
 const write = (p: string, text: string) => { fs.mkdirSync(path.dirname(path.join(ws, p)), { recursive: true }); fs.writeFileSync(path.join(ws, p), text) }
@@ -103,5 +103,26 @@ describe('live ui', () => {
   it('uses the fallback screens until the folder has its own', () => {
     const ui = createLiveUi({ workspace: ws, fallback: { home: { title: 'Home', blocks: [] } } })
     expect(ui.screens()).toEqual([{ name: 'home', title: 'Home', order: Infinity, file: '', screen: { title: 'Home', blocks: [] }, errors: [] }])
+  })
+})
+
+describe('decisions', () => {
+  it('keys a recommendation by its date, ticker and action, taking the date from the data it came from', () => {
+    const data = { today: { date: '2026-11-22', picks: [{ ticker: 'XLP', action: 'Buy' }] } }
+    expect(dataDate(data, 'today.picks')).toBe('2026-11-22')
+    expect(recKey({ ticker: 'XLP', action: 'Buy' }, '2026-11-22')).toBe('2026-11-22|XLP|Buy')
+    expect(recKey({ ticker: 'XLP', id: 'x1' }, '2026-11-22')).toBe('x1')
+  })
+  it('records, replaces and undoes a choice in decisions.json', () => {
+    const ui = createLiveUi({ workspace: ws })
+    const rec = { ticker: 'XLP', action: 'Buy', date: '2026-11-22', entry: 90 }
+    ui.decide(rec, 'accepted')
+    ui.decide({ ticker: 'CLX', action: 'Buy', date: '2026-11-22' }, 'declined')
+    ui.decide(rec, 'declined')
+    const items = (ui.data().decisions as any).items
+    expect(items.map((d: any) => [d.ticker, d.decision])).toEqual([['CLX', 'declined'], ['XLP', 'declined']])
+    expect(items[1]).toMatchObject({ id: '2026-11-22|XLP|Buy', entry: 90 })
+    ui.decide(rec, null)
+    expect((ui.data().decisions as any).items).toHaveLength(1)
   })
 })

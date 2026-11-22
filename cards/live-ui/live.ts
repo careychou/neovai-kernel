@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { ToolDef } from '../agent-loop'
 import { compilePanel, DEFAULT_EXTERNALS } from './compile'
-import { parseScreen, panelFiles, type Screen } from './screen'
+import { parseScreen, panelFiles, recKey, type Decision, type DecisionRecord, type Recommendation, type Screen } from './screen'
 
 export interface ScreenState {
   /** File name without `.json`. */
@@ -120,6 +120,18 @@ export function createLiveUi(o: LiveUiOptions) {
     return problems.length ? `Problems:\n- ${problems.join('\n- ')}` : `OK: ${list.map((s) => s.name).join(', ')} load without errors.`
   }
 
+  /** Records accepting or declining a recommendation in `<dataDir>/decisions.json`; null clears the choice. */
+  function decide(rec: Recommendation, decision: Decision | null): DecisionRecord[] {
+    const file = path.join(dataDir, 'decisions.json')
+    const cur = readJson(file) as { items?: DecisionRecord[] } | undefined
+    const id = recKey(rec)
+    const items = (Array.isArray(cur?.items) ? cur!.items : []).filter((d) => d.id !== id)
+    if (decision) items.push({ ...rec, id, decision, at: new Date().toISOString() })
+    fs.mkdirSync(dataDir, { recursive: true })
+    fs.writeFileSync(file, JSON.stringify({ ...cur, items }, null, 2))
+    return items
+  }
+
   function watch() {
     if (watcher || !o.onChange) return
     try {
@@ -134,7 +146,7 @@ export function createLiveUi(o: LiveUiOptions) {
 
   return {
     screensDir, dataDir,
-    screens, data, panel, reportError, check, watch,
+    screens, data, panel, reportError, check, watch, decide,
     dispose() { watcher?.close(); watcher = null; if (timer) clearTimeout(timer) }
   }
 }

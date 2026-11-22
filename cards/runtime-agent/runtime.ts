@@ -47,7 +47,7 @@ export function loadJobs(dir: string): Job[] {
 }
 
 /** The `save_data` tool: stores structured results as `<dataDir>/<name>.json` for the app's screens to show. */
-export function makeSaveDataTool(o: { dir: string }): ToolDef {
+export function makeSaveDataTool(o: { dir: string; locked?: string[] }): ToolDef {
   return {
     name: 'save_data',
     description: 'Save structured results (JSON) under a name so the app screens can show them. Replaces the previous data with that name.',
@@ -63,6 +63,7 @@ export function makeSaveDataTool(o: { dir: string }): ToolDef {
     async run(a) {
       const name = String(a?.name ?? '')
       if (!NAME.test(name)) throw new Error(`"${name}" is not a valid data name`)
+      if (o.locked?.includes(name)) throw new Error(`"${name}" is read-only: only the user changes it`)
       fs.mkdirSync(o.dir, { recursive: true })
       const file = path.join(o.dir, `${name}.json`)
       fs.writeFileSync(file, JSON.stringify(a.data ?? null, null, 2))
@@ -114,11 +115,13 @@ export function createRuntime(o: RuntimeOptions) {
   const dataDir = at(path.join(records, 'data'))
   const writable = o.writable ?? [records]
   const runs = new Map<string, { job: string; session: Session }>()
+  // Read-only files in the data folder may not be replaced through save_data either.
+  const lockedData = (o.readOnly ?? []).map((r) => path.relative(dataDir, at(r))).filter((r) => !r.includes(path.sep) && r.endsWith('.json')).map((r) => r.slice(0, -5))
 
   const tools = (): ToolDef[] => [
     ...makeFileTools({ root: ws, writable, readOnly: o.readOnly }),
     makeSkillTool({ dir: skillsDir }),
-    makeSaveDataTool({ dir: dataDir }),
+    makeSaveDataTool({ dir: dataDir, locked: lockedData }),
     ...(o.tools ?? [])
   ]
 

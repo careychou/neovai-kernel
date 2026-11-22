@@ -12,7 +12,7 @@ export type Block =
   | { type: 'table'; title?: string; data?: string; columns?: string[]; rows?: Record<string, unknown>[] }
   | { type: 'list'; title?: string; data?: string; items?: unknown[] }
   | { type: 'alerts'; title?: string; data?: string; items?: Alert[] }
-  | { type: 'recommendations'; title?: string; data?: string; items?: Recommendation[] }
+  | { type: 'recommendations'; title?: string; data?: string; items?: Recommendation[]; decide?: boolean }
   | { type: 'run'; job: string; label?: string }
   | { type: 'report'; job: string; title?: string }
   | { type: 'panel'; file: string; title?: string }
@@ -20,7 +20,23 @@ export type Block =
 
 export interface Metric { label: string; value: unknown; change?: unknown; note?: string }
 export interface Alert { level?: 'info' | 'warn' | 'bad' | 'good'; text: string }
-export interface Recommendation { ticker: string; action?: string; reason?: string; confidence?: unknown; target?: unknown; stop?: unknown }
+export interface Recommendation { ticker: string; action?: string; reason?: string; confidence?: unknown; entry?: unknown; target?: unknown; stop?: unknown; date?: string; id?: string }
+
+export type Decision = 'accepted' | 'declined'
+/** One recorded choice on a recommendation, kept in the `decisions` data as `{ items: DecisionRecord[] }`. */
+export interface DecisionRecord extends Recommendation { id: string; decision: Decision; at: string }
+
+/** Stable key of a recommendation: its own id, else date, ticker and action. */
+export function recKey(r: Recommendation, date?: string): string {
+  return r.id ?? [r.date ?? date ?? '', r.ticker, r.action ?? ''].join('|')
+}
+
+/** The date of the data a block reads, from the parent object of its path (for example today.date for today.picks). */
+export function dataDate(data: Record<string, unknown>, ref: string | undefined): string | undefined {
+  if (!ref || !ref.includes('.')) return undefined
+  const parent = resolveData(data, ref.split('.').slice(0, -1).join('.')) as Record<string, unknown> | undefined
+  return typeof parent?.date === 'string' ? parent.date : undefined
+}
 
 /** `title` names the tab; screens sort by `order`, then file name. */
 export interface Screen { title?: string; order?: number; blocks: Block[] }

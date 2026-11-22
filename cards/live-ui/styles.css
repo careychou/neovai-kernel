@@ -34,5 +34,16 @@
 .lu-rechead b { font-size: 16px; }
 .lu-action { padding: 1px 8px; border-radius: 10px; background: var(--accent, #4f8cff); color: #fff; font-size: 11px; text-transform: uppercase; }
 .lu-conf { margin-left: auto; color: var(--muted, #8b93a4); font-size: 12px; }
-.lu-run { display: flex; align-items: center; gap: 12px; }
-.lu-runstate { color: var(--muted, #8b93a4); font-size: 13px; }
+.lu-runbox { display: flex; flex-direction: column; gap: 10px; }
+.lu-run { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.lu-runstate { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--muted, #8b93a4); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lu-spin { flex: none; width: 12px; height: 12px; border: 2px solid var(--line, #272c37); border-top-color: var(--accent, #4f8cff); border-radius: 50%; animation: lu-spin .8s linear infinite; }
+@keyframes lu-spin { to { transform: rotate(360deg); } }
+.lu-activity { max-height: 320px; overflow: auto; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--line, #272c37); border-radius: 10px; background: var(--panel, #171a21); }
+.lu-decide { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.lu-decide button { padding: 4px 12px; font-size: 13px; }
+.lu-verdict { font-size: 12px; font-weight: 600; }
+.lu-verdict.lu-accepted { color: var(--ok, #3fb97c); }
+.lu-verdict.lu-declined { color: var(--muted, #8b93a4); }
+.lu-rec.lu-accepted { border-color: var(--ok, #3fb97c); }
+.lu-rec.lu-declined { opacity: .7; }
