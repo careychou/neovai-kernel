@@ -45,6 +45,10 @@ export function compilePanel(root: string, file: string, externals = DEFAULT_EXT
     if (seen.has(id)) return id
     seen.add(id)
     const src = fs.readFileSync(abs, 'utf8')
+    if (/\.css$/.test(abs)) {
+      defs.push(`${JSON.stringify(id)}: function (module) { module.exports = __css(${JSON.stringify(id)}, ${JSON.stringify(src)}) }`)
+      return id
+    }
     if (abs.endsWith('.json')) {
       defs.push(`${JSON.stringify(id)}: function (module) { module.exports = ${src.trim() || 'null'} }`)
       return id
@@ -65,7 +69,7 @@ export function compilePanel(root: string, file: string, externals = DEFAULT_EXT
       const dep = resolve(abs, spec)
       if (!dep) { errors.push(`${id}: cannot find "${spec}"`); continue }
       if (!inside(base, fs.realpathSync(dep))) { errors.push(`${id}: "${spec}" is outside the workspace`); continue }
-      if (/\.(css|scss|less)$/.test(dep)) { errors.push(`${id}: CSS files cannot be imported; use inline styles`); continue }
+      if (/\.(scss|less)$/.test(dep)) { errors.push(`${id}: only plain .css files can be imported`); continue }
       map[spec] = add(dep)
     }
     maps[id] = map
@@ -80,6 +84,13 @@ export function compilePanel(root: string, file: string, externals = DEFAULT_EXT
   if (errors.length) throw new CompileError(errors.join('\n'))
 
   const code = `const __host = globalThis.${HOST_GLOBAL};
+function __css(id, text) {
+  if (typeof document === 'undefined') return {};
+  let el = document.querySelector('style[data-panel-css="' + id + '"]');
+  if (!el) { el = document.createElement('style'); el.setAttribute('data-panel-css', id); document.head.appendChild(el); }
+  if (el.textContent !== text) el.textContent = text;
+  return {};
+}
 const __defs = {
 ${defs.join(',\n')}
 };

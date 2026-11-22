@@ -53,3 +53,7 @@
 .lu-grow { flex: 1; }
 .lu-skillchip { border-radius: 12px; font-family: ui-monospace, monospace; }
 .lu-skill { padding: 4px 16px; border: 1px solid var(--line, #272c37); border-radius: 10px; background: var(--panel, #171a21); font-size: 14px; line-height: 1.55; }
+.lu-chart { width: 100%; min-width: 0; padding: 8px 0 0; background: var(--panel, #171a21); border: 1px solid var(--line, #272c37); border-radius: 10px; overflow: hidden; }
+.lu-charttip { position: absolute; top: 8px; left: 12px; display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted, #8b93a4); pointer-events: none; }
+.lu-charttip b { color: var(--text, #e6e8ee); font-weight: 600; }
+.lu-charttip em { font-style: normal; }

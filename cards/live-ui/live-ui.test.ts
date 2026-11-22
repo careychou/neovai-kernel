@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { compilePanel, createLiveUi, dataDate, direction, HOST_GLOBAL, makeCheckUiTool, parseScreen, recKey, resolveData, show } from './index'
+import { chartPoints, compilePanel, createLiveUi, dataDate, niceTicks, panelFetch, xLabel, direction, HOST_GLOBAL, makeCheckUiTool, parseScreen, recKey, resolveData, show } from './index'
 
 let ws: string
 const write = (p: string, text: string) => { fs.mkdirSync(path.dirname(path.join(ws, p)), { recursive: true }); fs.writeFileSync(path.join(ws, p), text) }
@@ -19,18 +19,19 @@ describe('screen descriptions', () => {
         { type: 'heading', text: 'Hi' }, { type: 'markdown', data: 'today.summary' }, { type: 'metrics', data: 'today.metrics' },
         { type: 'table', rows: [{ a: 1 }] }, { type: 'list', items: ['x'] }, { type: 'alerts', data: 'today.alerts' },
         { type: 'recommendations', data: 'today.picks' }, { type: 'run', job: 'daily' }, { type: 'report', job: 'daily' },
-        { type: 'skill', name: 'market-scan' },
+        { type: 'skill', name: 'market-scan' }, { type: 'chart', kind: 'candlestick', data: 'prices.SPY' },
         { type: 'row', blocks: [{ type: 'panel', file: 'ui/panels/Chart.tsx' }] }
       ]
     }))
     expect(errors).toEqual([])
-    expect(screen?.blocks).toHaveLength(11)
+    expect(screen?.blocks).toHaveLength(12)
+    expect(parseScreen('{"blocks":[{"type":"chart","kind":"pie","rows":[]}]}').errors).toEqual(['blocks[0]: chart "kind" must be line, area, bar or candlestick'])
     expect(parseScreen('{"skills":"x","blocks":[{"type":"skill"}]}').errors).toEqual(['"skills" must be a list of skill names', 'blocks[0]: skill needs "name", a folder in skills/'])
   })
   it('lists every problem, with where it is', () => {
     expect(parseScreen('{').errors[0]).toMatch(/^not valid JSON/)
-    expect(parseScreen(JSON.stringify({ blocks: [{ type: 'chart' }, { type: 'run' }, { type: 'row', blocks: [{ type: 'panel', file: '../x.tsx' }] }, { type: 'table' }] })).errors).toEqual([
-      'blocks[0]: unknown block type "chart" (use heading, markdown, metrics, table, list, alerts, recommendations, run, report, panel, skill, row)',
+    expect(parseScreen(JSON.stringify({ blocks: [{ type: 'gauge' }, { type: 'run' }, { type: 'row', blocks: [{ type: 'panel', file: '../x.tsx' }] }, { type: 'table' }] })).errors).toEqual([
+      'blocks[0]: unknown block type "gauge" (use heading, markdown, metrics, table, list, alerts, recommendations, run, report, panel, skill, chart, row)',
       'blocks[1]: run needs "job"',
       'blocks[2].blocks[0]: panel needs "file", a .tsx path inside the workspace',
       'blocks[3]: table needs "data" or inline items'
@@ -73,6 +74,36 @@ describe('code panels', () => {
     write('ui/Pkg.tsx', "import x from 'lodash'\nimport y from './nope'\nexport default () => [x, y]")
     expect(() => compilePanel(ws, 'ui/Pkg.tsx')).toThrow('ui/Pkg.tsx: cannot import "lodash". Panels may import react, react/jsx-runtime, react-dom, @neovai/panel or relative workspace files.\nui/Pkg.tsx: cannot find "./nope"')
     expect(() => compilePanel(ws, '../out.tsx')).toThrow('outside the workspace')
+  })
+})
+
+describe('panel css and charts', () => {
+  it('compiles an imported .css file into a style tag the panel adds when it loads', async () => {
+    write('ui/look.css', '.x { color: red }')
+    write('ui/Styled.tsx', "import './look.css'\nexport default () => 1")
+    const r = compilePanel(ws, 'ui/Styled.tsx')
+    expect(r.files.sort()).toEqual(['ui/Styled.tsx', 'ui/look.css'])
+    expect(r.code).toContain('.x { color: red }')
+    write('ui/Sass.tsx', "import './a.scss'\nexport default () => 1")
+    write('ui/a.scss', '')
+    expect(() => compilePanel(ws, 'ui/Sass.tsx')).toThrow('only plain .css files')
+  })
+  it('turns price rows into chart points, with round ticks and readable dates', () => {
+    const rows = [{ date: '2026-01-02', open: 10, high: 12, low: 9, close: 11, volume: 100 }, { date: '2026-01-05', open: 11, high: 11.5, low: 'x', close: 10 }, { date: '2026-01-06', open: 10, high: 13, low: 10, close: 12.5 }]
+    expect(chartPoints({ kind: 'candlestick', rows }).points.map((p) => p.c)).toEqual([11, 12.5])
+    const line = chartPoints({ rows })
+    expect([line.x, line.ys, line.points.length]).toEqual(['date', ['close'], 3])
+    expect(niceTicks(9, 13, 4)).toEqual([9, 10, 11, 12, 13])
+    expect(xLabel('2026-01-05')).toBe('Jan 5')
+    expect(xLabel('n/a')).toBe('n/a')
+  })
+})
+
+describe('panel fetch', () => {
+  it('only fetches http and https, and reports failures instead of throwing', async () => {
+    expect(await panelFetch('file:///etc/passwd')).toMatchObject({ ok: false, error: 'only http and https URLs can be fetched' })
+    expect(await panelFetch('nope')).toMatchObject({ ok: false, error: 'not a URL: nope' })
+    expect((await panelFetch('http://127.0.0.1:1/x', { timeoutMs: 2000 })).ok).toBe(false)
   })
 })
 

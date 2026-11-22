@@ -3,6 +3,8 @@ import * as JsxRuntime from 'react/jsx-runtime'
 import { Component, createContext, useCallback, useContext, useEffect, useState, type ComponentType, type ReactNode } from 'react'
 import { HOST_GLOBAL, PANEL_MODULE, dataDate, direction, recKey, resolveData, show, type Alert, type Block, type Decision, type DecisionRecord, type Metric, type Recommendation, type RunInput, type Screen } from './screen'
 import type { PanelResult } from './live'
+import { Chart } from './chart'
+import { chartPoints, niceTicks, xLabel } from './chart-data'
 
 export type MarkdownView = ComponentType<{ text: string }>
 
@@ -35,9 +37,14 @@ export interface ScreenHost {
   prefs?: Record<string, unknown>
   /** Saves the user's preferences (the whole object). Enables `savePrefs` in panels. */
   savePrefs?: (prefs: Record<string, unknown>) => Promise<void> | void
+  /** Fetches a URL (GET) for a panel, through the app so it is not blocked by the window's security rules. Enables `fetch` in panels. */
+  fetch?: (url: string) => Promise<FetchResult>
   /** Opens the coding agent to change this screen, or one of its skills. Shows a bar on every screen. */
   codify?: (req: { screen: string; title: string; skill?: string; text?: string }) => void
 }
+
+/** A fetched page: status and body text. */
+export interface FetchResult { ok: boolean; status: number; text: string; error?: string }
 
 /** What a code panel can see and do, from `useApp()` in `@neovai/panel`. */
 export interface PanelApp {
@@ -64,6 +71,10 @@ export interface PanelApp {
   prefs: Record<string, unknown>
   /** Saves the user's preferences, replacing the whole object. Undefined when the app does not allow it. */
   savePrefs?: (prefs: Record<string, unknown>) => Promise<void>
+  /** Fetches a URL (GET, text). Undefined when the app does not allow it. */
+  fetchText?: (url: string) => Promise<FetchResult>
+  /** Fetches a URL and parses JSON; throws with the status or error when it fails. */
+  fetchJson?: <T = any>(url: string) => Promise<T>
   /** Opens the coding agent about this screen, optionally with text to start the request. */
   codify?: (text?: string) => void
   /** The screen and panel file this panel is on. */
@@ -97,6 +108,12 @@ function makeApp({ host, screen, title, file }: PanelCtx): PanelApp {
     prefs: host.prefs ?? {},
     savePrefs: host.savePrefs && (async (p) => { await host.savePrefs!(p) }),
     codify: host.codify && ((text?: string) => host.codify!({ screen, title, text })),
+    fetchText: host.fetch,
+    fetchJson: host.fetch && (async (url: string) => {
+      const r = await host.fetch!(url)
+      if (!r.ok) throw new Error(r.error ?? `${url} answered ${r.status}`)
+      return JSON.parse(r.text)
+    }),
     screen, file
   }
 }
@@ -149,7 +166,34 @@ export function PanelMarkdown({ text }: { text: string }) {
 }
 
 /** What `import ... from '@neovai/panel'` gives a panel. */
-export const panelModule = { useApp, usePanelState, Blocks, RunButton, Markdown: PanelMarkdown, show, direction, resolveData, recKey }
+export const panelModule = { useApp, usePanelState, useFetch, Blocks, RunButton, Chart, Markdown: PanelMarkdown, show, direction, resolveData, recKey, chartPoints, niceTicks, xLabel }
+
+/**
+ * Loads JSON from a URL and refreshes it every `refreshSecs` (0: only when the url changes).
+ * Returns { data, error, loading, reload }. Keeps the last good data while a refresh fails.
+ */
+export function useFetch<T = any>(url: string | null | undefined, refreshSecs = 0): { data: T | undefined; error: string | null; loading: boolean; reload: () => void } {
+  const { host } = useCtx()
+  const [st, setSt] = useState<{ data: T | undefined; error: string | null; loading: boolean }>({ data: undefined, error: null, loading: !!url })
+  const [n, setN] = useState(0)
+  useEffect(() => {
+    if (!url) return
+    if (!host.fetch) { setSt((s) => ({ ...s, loading: false, error: 'This app does not let panels fetch.' })); return }
+    let live = true
+    const load = () => {
+      setSt((s) => ({ ...s, loading: true }))
+      host.fetch!(url).then((r) => {
+        if (!live) return
+        if (!r.ok) return setSt((s) => ({ ...s, loading: false, error: r.error ?? `answered ${r.status}` }))
+        try { setSt({ data: JSON.parse(r.text) as T, error: null, loading: false }) } catch (e: any) { setSt((s) => ({ ...s, loading: false, error: `not JSON: ${e.message}` })) }
+      }).catch((e) => live && setSt((s) => ({ ...s, loading: false, error: String(e?.message ?? e) })))
+    }
+    load()
+    const t = refreshSecs > 0 ? setInterval(load, refreshSecs * 1000) : null
+    return () => { live = false; if (t) clearInterval(t) }
+  }, [url, refreshSecs, n])
+  return { ...st, reload: () => setN((x) => x + 1) }
+}
 
 /** Lets compiled panels import the app's React and the panel API. Call once in the renderer; pass any other modules panels may import. */
 export function registerHostModules(extra: Record<string, unknown> = {}) {
@@ -364,6 +408,10 @@ function BlockView({ b, host, tick, screen = '', title = '' }: { b: Block; host:
     }
     case 'panel':
       return <Section title={b.title}><CodePanel file={b.file} host={host} tick={tick} screen={screen} title={title} /></Section>
+    case 'chart': {
+      const rows = pick<Record<string, unknown>>({ data: b.data, items: b.rows }, d)
+      return <Section title={b.title}>{rows.length ? <Chart kind={b.kind} rows={rows} x={b.x} y={b.y} volume={b.volume} height={b.height} /> : <Empty />}</Section>
+    }
     case 'skill': {
       const text = host.skillText?.[b.name]
       return <Section title={b.title}>{text ? <div className="lu-skill"><Markdown text={text.replace(/^---[\s\S]*?\n---\n/, '')} /></div> : <p className="lu-empty">No skill named {b.name}.</p>}</Section>

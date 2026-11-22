@@ -20,6 +20,7 @@ export type Block =
   | { type: 'report'; job: string; title?: string }
   | { type: 'panel'; file: string; title?: string }
   | { type: 'skill'; name: string; title?: string }
+  | { type: 'chart'; title?: string; data?: string; rows?: Record<string, unknown>[]; kind?: 'line' | 'area' | 'bar' | 'candlestick'; x?: string; y?: string | string[]; volume?: boolean; height?: number }
   | { type: 'row'; blocks: Block[] }
 
 /** Options a screen passes to a job run: text, or named values the runtime agent receives as JSON. */
@@ -51,7 +52,7 @@ export function dataDate(data: Record<string, unknown>, ref: string | undefined)
  */
 export interface Screen { title?: string; order?: number; skills?: string[]; blocks: Block[] }
 
-export const BLOCK_TYPES = ['heading', 'markdown', 'metrics', 'table', 'list', 'alerts', 'recommendations', 'run', 'report', 'panel', 'skill', 'row'] as const
+export const BLOCK_TYPES = ['heading', 'markdown', 'metrics', 'table', 'list', 'alerts', 'recommendations', 'run', 'report', 'panel', 'skill', 'chart', 'row'] as const
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 const str = (v: unknown) => typeof v === 'string' && v.trim() !== ''
@@ -70,6 +71,10 @@ function checkBlock(b: unknown, at: string, errors: string[]) {
       break
     case 'panel':
       if (!str(b.file) || !/\.(tsx|ts|jsx|js)$/.test(String(b.file)) || String(b.file).includes('..')) errors.push(`${at}: panel needs "file", a .tsx path inside the workspace`)
+      break
+    case 'chart':
+      if (b.data === undefined && !Array.isArray(b.rows)) errors.push(`${at}: chart needs "data" or inline "rows"`)
+      if (b.kind !== undefined && !['line', 'area', 'bar', 'candlestick'].includes(b.kind as string)) errors.push(`${at}: chart "kind" must be line, area, bar or candlestick`)
       break
     case 'skill': if (!str(b.name)) errors.push(`${at}: skill needs "name", a folder in skills/`); break
     case 'row':

@@ -64,6 +64,22 @@ export default function Refresh() {
     expect(app.savePrefs).toBeUndefined()
   })
 
+  it('fetches JSON through the app and draws charts from a compiled panel', async () => {
+    let app!: PanelApp
+    const Grab = () => { app = useApp(); return null }
+    const urls: string[] = []
+    const fetch = async (url: string) => { urls.push(url); return url.includes('bad') ? { ok: false, status: 404, text: '' } : { ok: true, status: 200, text: '{"p":[1,2]}' } }
+    renderToStaticMarkup(<PanelScope host={host({ fetch })} file="ui/P.tsx"><Grab /></PanelScope>)
+    expect(await app.fetchJson!('https://x.test/q')).toEqual({ p: [1, 2] })
+    await expect(app.fetchJson!('https://x.test/bad')).rejects.toThrow('answered 404')
+    expect(urls).toEqual(['https://x.test/q', 'https://x.test/bad'])
+    write('ui/C.tsx', "import { Chart } from '@neovai/panel'\nexport default () => <Chart kind=\"candlestick\" rows={[{date:'2026-01-02',open:1,high:3,low:1,close:2,volume:5}]} />")
+    const C = await load(compilePanel(ws, 'ui/C.tsx').code)
+    const html = renderToStaticMarkup(<PanelScope host={host()} file="ui/C.tsx"><C /></PanelScope>)
+    expect(html).toContain('<svg')
+    expect(html).toContain('<rect')
+  })
+
   it('refuses outside a panel', () => {
     const Bad = () => { useApp(); return null }
     expect(() => renderToStaticMarkup(<Bad />)).toThrow('only work inside a panel')

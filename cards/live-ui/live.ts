@@ -153,6 +153,31 @@ export function createLiveUi(o: LiveUiOptions) {
 
 export type LiveUi = ReturnType<typeof createLiveUi>
 
+export interface PanelFetchOptions { timeoutMs?: number; maxBytes?: number; userAgent?: string }
+
+/**
+ * GET a URL for a panel, from the main process. Only http and https; the body is capped (default 2 MB) and the call
+ * times out (default 15 s). Never throws: failures come back as { ok: false, error }.
+ */
+export async function panelFetch(url: string, o: PanelFetchOptions = {}): Promise<{ ok: boolean; status: number; text: string; error?: string }> {
+  let u: URL
+  try { u = new URL(url) } catch { return { ok: false, status: 0, text: '', error: `not a URL: ${url}` } }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: false, status: 0, text: '', error: 'only http and https URLs can be fetched' }
+  const ctl = new AbortController()
+  const timer = setTimeout(() => ctl.abort(), o.timeoutMs ?? 15000)
+  try {
+    const r = await fetch(u, { signal: ctl.signal, redirect: 'follow', headers: { 'user-agent': o.userAgent ?? 'Mozilla/5.0 (Macintosh) Neovai', accept: 'application/json, text/plain, */*' } })
+    const max = o.maxBytes ?? 2_000_000
+    const buf = Buffer.from(await r.arrayBuffer())
+    const text = buf.subarray(0, max).toString('utf8')
+    return { ok: r.ok, status: r.status, text, ...(r.ok ? {} : { error: `${u.host} answered ${r.status}` }), ...(buf.length > max ? { error: `response cut at ${max} bytes` } : {}) }
+  } catch (e: any) {
+    return { ok: false, status: 0, text: '', error: e?.name === 'AbortError' ? 'timed out' : String(e?.message ?? e) }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /** The `check_ui` tool: lets the coding agent confirm its screen and panel edits load. */
 export function makeCheckUiTool(ui: LiveUi): ToolDef {
   return {
