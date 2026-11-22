@@ -1,0 +1,1 @@
+{ "name": "skills", "description": "App-embedded skills: instruction files in the app's own folder, listed in the prompt and loaded on demand.", "dependencies": ["agent-loop"] }

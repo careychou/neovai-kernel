@@ -16,6 +16,7 @@ TypeScript source package, no build step. Needs Node 22.5+ (`node:sqlite`).
 | `approval` | Permission gate (ask, allow for session, auto-approve) |
 | `session-store` | SQLite store for chats, messages and usage |
 | `settings` | Settings file with sealed API keys |
+| `skills` | App-embedded skills: `<dir>/<name>/SKILL.md` files, listed in the prompt and loaded on demand with the `skill` tool |
 
 Each card lives in `cards/<name>/` with `index.ts` (the only import point), `card.json` and tests.
 

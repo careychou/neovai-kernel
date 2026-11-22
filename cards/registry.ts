@@ -6,8 +6,9 @@ import webFetch from './web-fetch/card.json' with { type: 'json' }
 import approval from './approval/card.json' with { type: 'json' }
 import sessionStore from './session-store/card.json' with { type: 'json' }
 import settings from './settings/card.json' with { type: 'json' }
+import skills from './skills/card.json' with { type: 'json' }
 
 export interface CardInfo { name: string; description: string; dependencies: string[] }
 
 /** Every card in the kernel, in inventory order. */
-export const REGISTRY: CardInfo[] = [agentLoop, modelProviders, fileTools, shell, webFetch, approval, sessionStore, settings]
+export const REGISTRY: CardInfo[] = [agentLoop, modelProviders, fileTools, shell, webFetch, approval, sessionStore, settings, skills]

@@ -1,6 +1,6 @@
 {
   "name": "neovai-kernel",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Reusable agent cards for Neovai apps: pick the cards an app needs and compose them.",
   "type": "module",
