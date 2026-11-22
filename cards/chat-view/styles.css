@@ -29,7 +29,16 @@
 .cv-dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--muted, #8b93a4); animation: cv-blink 1.2s infinite; }
 .cv-dots i:nth-child(2) { animation-delay: .2s; }
 .cv-dots i:nth-child(3) { animation-delay: .4s; }
-.cv-tool-body { padding: 4px 0 6px 18px; display: flex; flex-direction: column; gap: 6px; }
+.cv-detail {
+  margin: 4px 0 8px 18px; border: 1px solid var(--line, #272c37); border-radius: 8px; background: var(--panel, #171a21); overflow: hidden;
+}
+.cv-detail-in, .cv-detail-out {
+  margin: 0; padding: 8px 12px; font: 12px/1.55 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-word; overflow: auto;
+}
+.cv-detail-in { color: var(--text, #e6e8ee); max-height: 180px; }
+.cv-detail-out { color: var(--muted, #8b93a4); max-height: 280px; }
+.cv-detail-in + .cv-detail-out, .cv-detail-in + .cv-detail-note { border-top: 1px solid var(--line, #272c37); }
+.cv-detail-note { padding: 6px 12px; font-size: 12px; color: var(--muted, #8b93a4); font-style: italic; }
 .cv-group-body { margin-left: 5px; padding-left: 12px; border-left: 2px solid var(--line, #272c37); }
 .cv-code {
   margin: 0; padding: 8px 10px; background: var(--panel, #171a21); border: 1px solid var(--line, #272c37); border-radius: 6px;
@@ -55,7 +64,8 @@
 .cv-composer.drag { outline: 2px dashed var(--accent, #6b8afd); outline-offset: 4px; border-radius: 10px; }
 .cv-row { display: flex; gap: 8px; align-items: flex-end; }
 .cv-row textarea { flex: 1; resize: none; }
-.cv-attach { flex: none; width: 34px; height: 34px; padding: 0; font-size: 18px; line-height: 1; border-radius: 8px; }
+.cv-attach { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; line-height: 1; border-radius: 8px; color: var(--muted, #8b93a4); }
+.cv-attach:hover:not(:disabled) { color: var(--text, #e6e8ee); }
 .cv-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .cv-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 240px; padding: 3px 4px 3px 3px; border: 1px solid var(--line, #272c37); border-radius: 8px; background: var(--panel, #171a21); font-size: 12px; }
 .cv-chip img { width: 28px; height: 28px; object-fit: cover; border-radius: 5px; }
@@ -65,4 +75,3 @@
 .cv-chip button:hover { color: var(--text, #e6e8ee); }
 .cv-attnote { font-size: 12px; color: var(--bad, #e5605c); }
 .cv-dropzone { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; border-radius: 10px; background: rgba(20,22,28,.85); color: var(--text, #e6e8ee); font-size: 14px; pointer-events: none; }
-.cv-plainhead { cursor: default; padding-left: 18px; }

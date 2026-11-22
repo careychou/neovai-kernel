@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ComponentType, type ReactNode, type Ref } from 'react'
-import { groupRows, groupState, peek, prettyArgs, technicalLabel, toolLabel, type Item, type ToolItem } from './items'
+import { groupRows, groupState, peek, technicalLabel, toolLabel, type Item, type ToolItem } from './items'
 import { ATTACH_LIMITS, classify, clipText, fitSize, type Attachment } from './attach'
 
 /** Renders markdown text. The app passes its own so links and sanitizing follow its rules. */
@@ -34,11 +34,29 @@ export function ThoughtBlock({ text, live, Markdown = Plain }: { text: string; l
 const Technical = createContext(false)
 const labelOf = (t: ToolItem, technical: boolean) => (technical ? technicalLabel(t) : toolLabel(t))
 
-function ToolBody({ t }: { t: ToolItem }) {
+/** What a step was given, minus its plain-language `intent`: a shell command reads as `$ command`. */
+export function stepInput(args: string): string {
+  let a: unknown
+  try { a = JSON.parse(args) } catch { return args.trim() }
+  if (!a || typeof a !== 'object' || Array.isArray(a)) return args.trim()
+  const { intent: _intent, description: _d, ...rest } = a as Record<string, unknown>
+  if (typeof rest.command === 'string') return `$ ${rest.command}`
+  const keys = Object.keys(rest)
+  if (keys.length === 0) return ''
+  if (keys.length === 1 && typeof rest[keys[0]] === 'string') return `${keys[0]}: ${rest[keys[0]]}`
+  return JSON.stringify(rest, null, 2)
+}
+
+/** Level three: the step's input and its output in one panel, each part scrolling on its own. */
+export function ToolBody({ t }: { t: ToolItem }) {
+  const input = stepInput(t.args)
+  const output = t.output?.replace(/\s+$/, '')
   return (
-    <div className="cv-tool-body">
-      <pre className="cv-code">{prettyArgs(t.args)}</pre>
-      {t.output !== undefined && <pre className="cv-code cv-out">{t.output}</pre>}
+    <div className="cv-detail">
+      {input && <pre className="cv-detail-in">{input}</pre>}
+      {output ? <pre className="cv-detail-out">{output}</pre>
+        : t.ok === undefined ? <div className="cv-detail-note">Running…</div>
+        : <div className="cv-detail-note">No output</div>}
     </div>
   )
 }
@@ -46,25 +64,15 @@ function ToolBody({ t }: { t: ToolItem }) {
 const mark = (t: ToolItem) =>
   t.ok === undefined ? <span className="cv-spin" /> : t.ok ? <span className="cv-ok">✓</span> : <span className="cv-bad">✗</span>
 
-/** One tool call: a quiet one-line row. Plain rows stop here; technical rows expand to arguments and output. */
+/** One tool call: a one-line row (plain words by default) that opens to its input and output. */
 export function ToolRow({ t }: { t: ToolItem }) {
   const [open, setOpen] = useState(false)
   const technical = useContext(Technical)
-  if (!technical) {
-    return (
-      <div className={`cv-tool${t.ok === undefined ? ' running' : ''}`}>
-        <div className="cv-tool-head cv-plainhead">
-          <span className="cv-label">{toolLabel(t)}</span>
-          {mark(t)}
-        </div>
-      </div>
-    )
-  }
   return (
     <div className={`cv-tool${t.ok === undefined ? ' running' : ''}`}>
       <button className="cv-tool-head" onClick={() => setOpen(!open)} aria-expanded={open}>
         <span className="cv-chev">{open ? '▾' : '›'}</span>
-        <span className="cv-label">{technicalLabel(t)}</span>
+        <span className="cv-label">{labelOf(t, technical)}</span>
         {mark(t)}
       </button>
       {open && <ToolBody t={t} />}
@@ -94,8 +102,8 @@ export function ToolGroup({ items }: { items: ToolItem[] }) {
 
 /**
  * The whole conversation: user and assistant messages, thoughts, tool rows and errors.
- * Tool rows read in plain words by default, two levels at most: a group row opens to its steps, and steps do not open.
- * Set `technical` for developer views: raw tool names, and each row expands to its arguments and output.
+ * Tool rows have three levels: a summary row ("<step> and N other steps") opens to its steps in plain words,
+ * and each step opens to what it was given and what came back. Set `technical` to label steps with raw tool names.
  */
 export function MessageList({ items, Markdown = Plain, technical = false }: { items: Item[]; Markdown?: MarkdownView; technical?: boolean }) {
   return (
@@ -191,6 +199,15 @@ export interface ComposerProps {
   extra?: ReactNode
 }
 
+/** Paperclip icon for the attach button; draws in the current text colour. */
+export function PaperclipIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+    </svg>
+  )
+}
+
 /** The standard chat input: text box, attach button, paste and drag-and-drop of images and files, Send/Stop. */
 export function Composer({ value, onChange, onSend, running, onStop, placeholder, inputRef, allowAttachments = true, extra }: ComposerProps) {
   const [atts, setAtts] = useState<Attachment[]>([])
@@ -235,7 +252,7 @@ export function Composer({ value, onChange, onSend, running, onStop, placeholder
       <div className="cv-row">
         {allowAttachments && (
           <>
-            <button className="cv-attach" title="Attach images or files (or paste / drop them here)" aria-label="Attach files" onClick={() => picker.current?.click()} disabled={atts.length >= ATTACH_LIMITS.maxFiles}>＋</button>
+            <button className="cv-attach" title="Attach images or files (or paste / drop them here)" aria-label="Attach files" onClick={() => picker.current?.click()} disabled={atts.length >= ATTACH_LIMITS.maxFiles}><PaperclipIcon /></button>
             <input ref={picker} type="file" multiple hidden onChange={(e) => { void add([...(e.target.files ?? [])]); e.target.value = '' }} />
           </>
         )}
