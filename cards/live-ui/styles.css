@@ -47,3 +47,9 @@
 .lu-verdict.lu-declined { color: var(--muted, #8b93a4); }
 .lu-rec.lu-accepted { border-color: var(--ok, #3fb97c); }
 .lu-rec.lu-declined { opacity: .7; }
+.lu-codify { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.lu-codify button { padding: 3px 10px; font-size: 12px; }
+.lu-uses { color: var(--muted, #8b93a4); }
+.lu-grow { flex: 1; }
+.lu-skillchip { border-radius: 12px; font-family: ui-monospace, monospace; }
+.lu-skill { padding: 4px 16px; border: 1px solid var(--line, #272c37); border-radius: 10px; background: var(--panel, #171a21); font-size: 14px; line-height: 1.55; }

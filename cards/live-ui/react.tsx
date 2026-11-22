@@ -28,6 +28,10 @@ export interface ScreenHost {
   /** Extra props every code panel receives, for example the user's goals. */
   panelProps?: Record<string, unknown>
   Markdown?: MarkdownView
+  /** Text of each skill by name, for `skill` blocks. */
+  skillText?: Record<string, string>
+  /** Opens the coding agent to change this screen, or one of its skills. Shows a bar on every screen. */
+  codify?: (req: { screen: string; title: string; skill?: string }) => void
 }
 
 /** Lets compiled panels import the app's React. Call once in the renderer; pass any other modules panels may import. */
@@ -241,6 +245,10 @@ function BlockView({ b, host, tick }: { b: Block; host: ScreenHost; tick?: unkno
     }
     case 'panel':
       return <Section title={b.title}><CodePanel file={b.file} host={host} tick={tick} /></Section>
+    case 'skill': {
+      const text = host.skillText?.[b.name]
+      return <Section title={b.title}>{text ? <div className="lu-skill"><Markdown text={text.replace(/^---[\s\S]*?\n---\n/, '')} /></div> : <p className="lu-empty">No skill named {b.name}.</p>}</Section>
+    }
     case 'row':
       return <div className="lu-row">{b.blocks.map((c, i) => <BlockView key={i} b={c} host={host} tick={tick} />)}</div>
   }
@@ -250,9 +258,20 @@ function BlockView({ b, host, tick }: { b: Block; host: ScreenHost; tick?: unkno
  * Draws a screen description with the built-in blocks. `errors` are problems with the file as it is now;
  * the screen shown is the last valid one. `tick` changes whenever the workspace does, so panels recheck.
  */
-export function ScreenView({ screen, errors = [], host, tick }: { screen: Screen | null; errors?: string[]; host: ScreenHost; tick?: unknown }) {
+export function ScreenView({ screen, name = '', errors = [], host, tick }: { screen: Screen | null; name?: string; errors?: string[]; host: ScreenHost; tick?: unknown }) {
+  const title = screen?.title ?? name
   return (
     <div className="lu-screen">
+      {host.codify && (
+        <div className="lu-codify">
+          {screen?.skills?.length ? <span className="lu-uses">Built on</span> : null}
+          {screen?.skills?.map((s) => (
+            <button key={s} className="lu-skillchip" title={`View or change the ${s} skill`} onClick={() => host.codify!({ screen: name, title, skill: s })}>{s}</button>
+          ))}
+          <span className="lu-grow" />
+          <button title="Ask Codify to change how this screen looks or behaves" onClick={() => host.codify!({ screen: name, title })}>Change this screen</button>
+        </div>
+      )}
       {errors.length > 0 && (
         <div className="lu-error">
           {screen ? 'Showing the last version that worked. ' : ''}This screen's description has problems:

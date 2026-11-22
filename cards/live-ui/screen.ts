@@ -16,6 +16,7 @@ export type Block =
   | { type: 'run'; job: string; label?: string }
   | { type: 'report'; job: string; title?: string }
   | { type: 'panel'; file: string; title?: string }
+  | { type: 'skill'; name: string; title?: string }
   | { type: 'row'; blocks: Block[] }
 
 export interface Metric { label: string; value: unknown; change?: unknown; note?: string }
@@ -38,10 +39,13 @@ export function dataDate(data: Record<string, unknown>, ref: string | undefined)
   return typeof parent?.date === 'string' ? parent.date : undefined
 }
 
-/** `title` names the tab; screens sort by `order`, then file name. */
-export interface Screen { title?: string; order?: number; blocks: Block[] }
+/**
+ * `title` names the tab; screens sort by `order`, then file name. `skills` names the skills the screen is built on,
+ * so the app can offer to view or change them next to the screen.
+ */
+export interface Screen { title?: string; order?: number; skills?: string[]; blocks: Block[] }
 
-export const BLOCK_TYPES = ['heading', 'markdown', 'metrics', 'table', 'list', 'alerts', 'recommendations', 'run', 'report', 'panel', 'row'] as const
+export const BLOCK_TYPES = ['heading', 'markdown', 'metrics', 'table', 'list', 'alerts', 'recommendations', 'run', 'report', 'panel', 'skill', 'row'] as const
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 const str = (v: unknown) => typeof v === 'string' && v.trim() !== ''
@@ -58,6 +62,7 @@ function checkBlock(b: unknown, at: string, errors: string[]) {
     case 'panel':
       if (!str(b.file) || !/\.(tsx|ts|jsx|js)$/.test(String(b.file)) || String(b.file).includes('..')) errors.push(`${at}: panel needs "file", a .tsx path inside the workspace`)
       break
+    case 'skill': if (!str(b.name)) errors.push(`${at}: skill needs "name", a folder in skills/`); break
     case 'row':
       if (!Array.isArray(b.blocks)) errors.push(`${at}: row needs "blocks"`)
       else b.blocks.forEach((c, i) => checkBlock(c, `${at}.blocks[${i}]`, errors))
@@ -73,6 +78,7 @@ export function validateScreen(raw: unknown): { screen: Screen | null; errors: s
   if (!isObj(raw)) return { screen: null, errors: ['the screen must be a JSON object with "blocks"'] }
   if (raw.title !== undefined && typeof raw.title !== 'string') errors.push('"title" must be text')
   if (raw.order !== undefined && typeof raw.order !== 'number') errors.push('"order" must be a number')
+  if (raw.skills !== undefined && (!Array.isArray(raw.skills) || !raw.skills.every(str))) errors.push('"skills" must be a list of skill names')
   if (!Array.isArray(raw.blocks)) errors.push('"blocks" must be a list')
   else raw.blocks.forEach((b, i) => checkBlock(b, `blocks[${i}]`, errors))
   return errors.length ? { screen: null, errors } : { screen: raw as unknown as Screen, errors }

@@ -14,21 +14,23 @@ afterEach(() => { fs.rmSync(ws, { recursive: true, force: true }); delete (globa
 describe('screen descriptions', () => {
   it('accepts every block type, nested rows included', () => {
     const { screen, errors } = parseScreen(JSON.stringify({
-      title: 'Today', order: 1,
+      title: 'Today', order: 1, skills: ['market-scan'],
       blocks: [
         { type: 'heading', text: 'Hi' }, { type: 'markdown', data: 'today.summary' }, { type: 'metrics', data: 'today.metrics' },
         { type: 'table', rows: [{ a: 1 }] }, { type: 'list', items: ['x'] }, { type: 'alerts', data: 'today.alerts' },
         { type: 'recommendations', data: 'today.picks' }, { type: 'run', job: 'daily' }, { type: 'report', job: 'daily' },
+        { type: 'skill', name: 'market-scan' },
         { type: 'row', blocks: [{ type: 'panel', file: 'ui/panels/Chart.tsx' }] }
       ]
     }))
     expect(errors).toEqual([])
-    expect(screen?.blocks).toHaveLength(10)
+    expect(screen?.blocks).toHaveLength(11)
+    expect(parseScreen('{"skills":"x","blocks":[{"type":"skill"}]}').errors).toEqual(['"skills" must be a list of skill names', 'blocks[0]: skill needs "name", a folder in skills/'])
   })
   it('lists every problem, with where it is', () => {
     expect(parseScreen('{').errors[0]).toMatch(/^not valid JSON/)
     expect(parseScreen(JSON.stringify({ blocks: [{ type: 'chart' }, { type: 'run' }, { type: 'row', blocks: [{ type: 'panel', file: '../x.tsx' }] }, { type: 'table' }] })).errors).toEqual([
-      'blocks[0]: unknown block type "chart" (use heading, markdown, metrics, table, list, alerts, recommendations, run, report, panel, row)',
+      'blocks[0]: unknown block type "chart" (use heading, markdown, metrics, table, list, alerts, recommendations, run, report, panel, skill, row)',
       'blocks[1]: run needs "job"',
       'blocks[2].blocks[0]: panel needs "file", a .tsx path inside the workspace',
       'blocks[3]: table needs "data" or inline items'
