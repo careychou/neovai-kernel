@@ -19,7 +19,7 @@ describe('fromMessages', () => {
       { role: 'assistant', content: 'done', tool_calls: [call('c', 'grep', { pattern: 'x' })] }
     ]
     expect(fromMessages(saved)).toEqual([
-      { kind: 'user', text: 'hi\n[image]' },
+      { kind: 'user', text: 'hi', images: ['data:x'] },
       { kind: 'reasoning', text: 'Look first.' },
       { kind: 'tool', callId: 'a', name: 'read_file', args: '{"path":"x.ts"}', output: 'body', ok: true },
       { kind: 'tool', callId: 'b', name: 'shell', args: '{"command":"ls"}', output: 'Error: boom', ok: false },
@@ -91,5 +91,39 @@ describe('labels', () => {
   it('peeks at the first line of a thought without markdown marks', () => {
     expect(peek('  **Plan** the # scan\nsecond')).toBe('Plan the  scan')
     expect(peek('x'.repeat(200))).toHaveLength(90)
+  })
+})
+
+import { buildUserContent } from '../agent-loop/content'
+import { classify, clipText, fitSize, userView } from './index'
+
+describe('attachments', () => {
+  it('classifies images and text files, and refuses the rest', () => {
+    expect(classify('shot.PNG')).toBe('image')
+    expect(classify('', 'image/jpeg')).toBe('image')
+    expect(classify('logo.svg', 'image/svg+xml')).toBe('text')
+    expect(classify('notes.md')).toBe('text')
+    expect(classify('data.bin', 'application/json')).toBe('text')
+    expect(classify('report.pdf', 'application/pdf')).toBe(null)
+  })
+
+  it('fits large images in the box without upscaling small ones', () => {
+    expect(fitSize(3136, 1568)).toEqual({ width: 1568, height: 784 })
+    expect(fitSize(400, 300)).toEqual({ width: 400, height: 300 })
+  })
+
+  it('cuts long text with a note', () => {
+    expect(clipText('abcdef', 3)).toEqual({ text: 'abc', note: 'cut to the first 3 of 6 characters' })
+    expect(clipText('ab', 3)).toEqual({ text: 'ab' })
+  })
+
+  it('rebuilds what the user sent from saved content', () => {
+    const content = buildUserContent('Make it look like this', [
+      { kind: 'text', name: 'spec "v2".md', text: 'body' },
+      { kind: 'image', name: 'a.png', dataUrl: 'data:image/png;base64,AA', width: 10, height: 20 }
+    ])
+    expect(userView(content)).toEqual({ text: 'Make it look like this', images: ['data:image/png;base64,AA'], files: ['spec "v2".md'] })
+    expect(userView(buildUserContent('', [{ kind: 'image', name: 'a.png', dataUrl: 'data:x', width: 1, height: 1 }]))).toEqual({ text: '', images: ['data:x'], files: [] })
+    expect(fromMessages([{ role: 'user', content }])[0]).toEqual({ kind: 'user', text: 'Make it look like this', images: ['data:image/png;base64,AA'], files: ['spec "v2".md'] })
   })
 })

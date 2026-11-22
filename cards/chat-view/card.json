@@ -1,1 +1,1 @@
-{ "name": "chat-view", "description": "The chat experience: messages, a folding thoughts block and collapsed tool calls, as a view model plus React components and styles.", "dependencies": ["agent-loop"] }
+{ "name": "chat-view", "description": "The chat experience: messages, a folding thoughts block, collapsed tool calls, and a composer that attaches images and files (button, paste, drag and drop), as a view model plus React components and styles.", "dependencies": ["agent-loop"] }

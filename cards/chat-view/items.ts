@@ -1,9 +1,9 @@
 import type { AgentEvent, Message } from '../agent-loop/types'
-import { textOf } from '../agent-loop/content'
+import { userView } from './attach'
 
 /** One thing the chat draws. */
 export type Item =
-  | { kind: 'user'; text: string }
+  | { kind: 'user'; text: string; images?: string[]; files?: string[] }
   | { kind: 'reasoning'; text: string; live?: boolean }
   | { kind: 'assistant'; text: string; live?: boolean }
   | { kind: 'tool'; callId: string; name: string; args: string; output?: string; ok?: boolean }
@@ -20,7 +20,10 @@ export function fromMessages(messages: Message[]): Item[] {
   for (const m of messages) if (m.role === 'tool') results.set(m.tool_call_id, m.content)
   const out: Item[] = []
   for (const m of messages) {
-    if (m.role === 'user') out.push({ kind: 'user', text: textOf(m.content) })
+    if (m.role === 'user') {
+      const v = userView(m.content)
+      out.push({ kind: 'user', text: v.text, ...(v.images.length ? { images: v.images } : {}), ...(v.files.length ? { files: v.files } : {}) })
+    }
     if (m.role !== 'assistant') continue
     if (m.reasoning?.trim()) out.push({ kind: 'reasoning', text: m.reasoning })
     if (m.content) out.push({ kind: 'assistant', text: m.content })
