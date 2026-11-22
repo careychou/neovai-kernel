@@ -1,0 +1,1 @@
+{ "name": "runtime-agent", "description": "Runs the app's own functions (jobs) headlessly with every skill appended to the instruction, read fresh each run; saves reports and structured data.", "dependencies": ["agent-loop", "file-tools", "skills", "approval"] }

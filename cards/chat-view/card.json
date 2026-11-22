@@ -1,0 +1,1 @@
+{ "name": "chat-view", "description": "The chat experience: messages, a folding thoughts block and collapsed tool calls, as a view model plus React components and styles.", "dependencies": ["agent-loop"] }

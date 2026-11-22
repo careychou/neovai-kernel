@@ -15,7 +15,8 @@ export interface Skill {
 
 const NAME = /^[a-z0-9][a-z0-9-]*$/
 
-function parse(text: string): { meta: Record<string, string>; body: string } {
+/** Splits a `---` header of `key: value` lines from the body. */
+export function parseFrontMatter(text: string): { meta: Record<string, string>; body: string } {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text)
   if (!m) return { meta: {}, body: text.trim() }
   const meta: Record<string, string> = {}
@@ -32,7 +33,7 @@ export function readSkill(dir: string, name: string): Skill | null {
   const file = path.join(dir, name, 'SKILL.md')
   let text: string
   try { text = fs.readFileSync(file, 'utf8') } catch { return null }
-  const { meta, body } = parse(text)
+  const { meta, body } = parseFrontMatter(text)
   const order = Number(meta.order)
   return { name, description: meta.description ?? '', order: Number.isFinite(order) && meta.order !== undefined ? order : Infinity, body, file }
 }
@@ -51,6 +52,12 @@ export function loadSkills(dir: string): Skill[] {
 export function skillsPrompt(skills: Skill[]): string {
   if (!skills.length) return '(no skills yet)'
   return skills.map((s) => `- ${s.name}: ${s.description || '(no description)'}`).join('\n')
+}
+
+/** Every skill in full, in order: the block a runtime agent appends to its main instruction. */
+export function skillsInstructions(skills: Skill[]): string {
+  if (!skills.length) return '(no skills yet)'
+  return skills.map((s) => `## Skill: ${s.name}\n${s.description ? s.description + '\n' : ''}File: ${s.file}\n\n${s.body}`).join('\n\n')
 }
 
 /** The `skill` tool: returns one skill's instructions by name. */

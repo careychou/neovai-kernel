@@ -24,6 +24,13 @@ beforeAll(() => {
 })
 
 describe('file tools', () => {
+  it('with a writable list, refuses writes anywhere else', async () => {
+    const w = Object.fromEntries(makeFileTools({ root, writable: ['records'] }).map((d) => [d.name, d]))
+    await w.write_file.run({ path: 'records/today.md', content: 'ok' }, ctx)
+    expect(fs.readFileSync(path.join(root, 'records/today.md'), 'utf8')).toBe('ok')
+    await expect(w.write_file.run({ path: 'skills/x/SKILL.md', content: 'no' }, ctx)).rejects.toThrow(/read-only/)
+  })
+
   it('offers the five tools', () => {
     expect(Object.keys(t)).toEqual(['read_file', 'write_file', 'edit_file', 'glob', 'grep'])
   })

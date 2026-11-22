@@ -1,10 +1,12 @@
 {
   "name": "neovai-kernel",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Reusable agent cards for Neovai apps: pick the cards an app needs and compose them.",
   "type": "module",
   "exports": {
+    "./cards/*/react": "./cards/*/react.tsx",
+    "./cards/*/styles.css": "./cards/*/styles.css",
     "./cards/*": "./cards/*/index.ts",
     "./compose": "./compose.ts"
   },
@@ -15,7 +17,22 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "typescript": "^7.0.2",
     "vitest": "^4.1.12"
+  },
+  "dependencies": {
+    "sucrase": "^3.35.1"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
   }
 }

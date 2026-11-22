@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { loadSkills, makeSkillTool, readSkill, skillsPrompt } from './index'
+import { loadSkills, makeSkillTool, readSkill, skillsPrompt, skillsInstructions } from './index'
 
 let dir: string
 const put = (name: string, text: string) => {
@@ -15,6 +15,17 @@ beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'skills-')) })
 afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }) })
 
 describe('skills', () => {
+  it('renders every skill in full, in order, for a runtime instruction', () => {
+    put('b-second', '---\ndescription: Second job.\norder: 2\n---\nDo B.')
+    put('a-first', '---\ndescription: First job.\norder: 1\n---\nDo A.')
+    const text = skillsInstructions(loadSkills(dir))
+    expect(text.indexOf('## Skill: a-first')).toBeLessThan(text.indexOf('## Skill: b-second'))
+    expect(text).toContain('First job.')
+    expect(text).toContain('Do A.')
+    expect(text).toContain('Do B.')
+    expect(skillsInstructions([])).toBe('(no skills yet)')
+  })
+
   it('lists skills by order, then by name, and skips folders without a SKILL.md', () => {
     put('scan', '---\ndescription: Scan things\norder: 2\n---\nScan body')
     put('prefs', '---\ndescription: "Quoted: text"\norder: 1\n---\n\nPrefs body\n')

@@ -1,0 +1,1 @@
+{ "name": "live-ui", "description": "Screens that change while the app runs: JSON screen descriptions drawn with built-in blocks, plus workspace code panels compiled at runtime, keeping the last good version.", "dependencies": ["agent-loop"] }

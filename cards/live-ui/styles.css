@@ -1,0 +1,38 @@
+/* Live UI blocks. Themed through the app's --text, --muted, --line, --panel, --accent, --ok and --bad variables. */
+.lu-screen { display: flex; flex-direction: column; gap: 18px; max-width: 1100px; }
+.lu-heading { margin: 0; font-size: 22px; }
+.lu-block { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.lu-title { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted, #8b93a4); text-transform: uppercase; letter-spacing: .04em; }
+.lu-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+.lu-empty { margin: 0; color: var(--muted, #8b93a4); font-size: 13px; }
+.lu-error { padding: 10px 12px; border: 1px solid var(--bad, #e5605c); border-radius: 8px; color: var(--bad, #e5605c); white-space: pre-wrap; font-size: 13px; }
+.lu-error ul { margin: 6px 0 0; padding-left: 18px; }
+.lu-metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.lu-metric { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; background: var(--panel, #171a21); border: 1px solid var(--line, #272c37); border-radius: 10px; }
+.lu-metric span { color: var(--muted, #8b93a4); font-size: 12px; }
+.lu-metric b { font-size: 20px; }
+.lu-metric em { font-style: normal; font-size: 13px; }
+.lu-metric small { color: var(--muted, #8b93a4); font-size: 11px; }
+.lu-up { color: var(--ok, #3fb97c); }
+.lu-down { color: var(--bad, #e5605c); }
+.lu-flat { color: var(--muted, #8b93a4); }
+.lu-tablewrap { overflow-x: auto; border: 1px solid var(--line, #272c37); border-radius: 10px; }
+.lu-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.lu-table th, .lu-table td { padding: 7px 10px; text-align: left; border-bottom: 1px solid var(--line, #272c37); white-space: nowrap; }
+.lu-table th { color: var(--muted, #8b93a4); font-weight: 500; background: var(--panel, #171a21); }
+.lu-table tr:last-child td { border-bottom: 0; }
+.lu-list { margin: 0; padding-left: 18px; line-height: 1.6; }
+.lu-alert { padding: 8px 12px; border-left: 3px solid var(--accent, #4f8cff); background: var(--panel, #171a21); border-radius: 4px; font-size: 13px; }
+.lu-alert.lu-warn { border-left-color: #e0a84f; }
+.lu-alert.lu-bad { border-left-color: var(--bad, #e5605c); }
+.lu-alert.lu-good { border-left-color: var(--ok, #3fb97c); }
+.lu-recs { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.lu-rec { padding: 12px 14px; background: var(--panel, #171a21); border: 1px solid var(--line, #272c37); border-radius: 10px; }
+.lu-rec p { margin: 6px 0; font-size: 13px; line-height: 1.5; }
+.lu-rec small { color: var(--muted, #8b93a4); }
+.lu-rechead { display: flex; align-items: center; gap: 8px; }
+.lu-rechead b { font-size: 16px; }
+.lu-action { padding: 1px 8px; border-radius: 10px; background: var(--accent, #4f8cff); color: #fff; font-size: 11px; text-transform: uppercase; }
+.lu-conf { margin-left: auto; color: var(--muted, #8b93a4); font-size: 12px; }
+.lu-run { display: flex; align-items: center; gap: 12px; }
+.lu-runstate { color: var(--muted, #8b93a4); font-size: 13px; }

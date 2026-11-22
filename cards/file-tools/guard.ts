@@ -4,6 +4,8 @@ import path from 'node:path'
 export interface GuardOptions {
   /** Paths relative to the root that may be read but never written. */
   readOnly?: string[]
+  /** When set, only these paths (relative to the root) may be written; everything else is read-only. */
+  writable?: string[]
 }
 
 export interface Guard {
@@ -30,12 +32,14 @@ const inside = (root: string, p: string) => p === root || p.startsWith(root + pa
 export function makeGuard(root: string, opts: GuardOptions = {}): Guard {
   const base = real(root)
   const locked = (opts.readOnly ?? []).map((r) => real(path.join(base, r)))
+  const open = opts.writable?.map((r) => real(path.join(base, r)))
   return {
     root: base,
     check(p, write = false) {
       const abs = real(path.isAbsolute(p) ? p : path.join(base, p))
       if (!inside(base, abs)) throw new Error(`${p} is outside the workspace`)
       if (write && locked.some((l) => inside(l, abs))) throw new Error(`${p} is read-only`)
+      if (write && open && !open.some((w) => inside(w, abs))) throw new Error(`${p} is read-only`)
       return abs
     }
   }
