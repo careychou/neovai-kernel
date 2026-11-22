@@ -61,6 +61,18 @@ describe('agent loop', () => {
     expect(events.filter((e) => e.kind === 'tool_end').every((e: any) => e.ok)).toBe(true)
   })
 
+  it('offers every tool a plain-language intent and strips it before the tool runs', async () => {
+    let seen: any
+    const spy: ToolDef = { name: 'spy', description: '', parameters: { type: 'object', properties: { x: { type: 'string' } } }, run: async (a) => { seen = a; return 'ok' } }
+    const own: ToolDef = { name: 'own', description: '', parameters: { type: 'object', properties: { intent: { type: 'string' } } }, run: async (a) => `own:${a.intent}` }
+    const { session, requests, events } = setup([call(['spy', { x: '1', intent: 'Check prices' }], ['own', { intent: 'keep' }]), say('done')], { tools: [spy, own] })
+    await session.send('go')
+    expect(Object.keys((requests[0].tools![0].function.parameters as any).properties)).toEqual(['intent', 'x'])
+    expect(seen).toEqual({ x: '1' })
+    expect(toolOutputs(requests[1].messages)[1]).toBe('own:keep')
+    expect(events.find((e) => e.kind === 'tool_start')).toMatchObject({ args: JSON.stringify({ x: '1', intent: 'Check prices' }) })
+  })
+
   it('turns tool failures into error output the model can read', async () => {
     const boom: ToolDef = { name: 'boom', description: '', parameters: { type: 'object', properties: {} }, run: async () => { throw new Error('kaput') } }
     const { session, requests, events } = setup(

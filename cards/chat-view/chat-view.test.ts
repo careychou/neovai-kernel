@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentEvent, Message } from '../agent-loop/types'
-import { applyEvent, fromMessages, groupRows, groupState, peek, prettyArgs, summarize, toolLabel, type Item, type ToolItem } from './index'
+import { applyEvent, fromMessages, groupRows, groupState, peek, prettyArgs, summarize, technicalLabel, toolLabel, type Item, type ToolItem } from './index'
 
 const call = (id: string, name: string, args: object) =>
   ({ id, type: 'function' as const, function: { name, arguments: JSON.stringify(args) } })
@@ -83,10 +83,17 @@ describe('labels', () => {
     expect(summarize('web_fetch', '{"url":"https://example.com"}')).toBe('https://example.com')
     expect(summarize('skill', '{"name":"market-scan"}')).toBe('market-scan')
     expect(summarize('shell', '{"comm')).toBe('')
-    expect(toolLabel({ name: 'grep', args: '{"pattern":"foo"}' })).toBe('grep foo')
-    expect(toolLabel({ name: 'list', args: '{}' })).toBe('list')
+    expect(technicalLabel({ name: 'grep', args: '{"pattern":"foo"}' })).toBe('grep foo')
+    expect(technicalLabel({ name: 'list', args: '{}' })).toBe('list')
     expect(prettyArgs('{"a":1}')).toBe('{\n  "a": 1\n}')
     expect(prettyArgs('{bad')).toBe('{bad')
+  })
+  it('labels tool rows in plain words, never the raw command', () => {
+    expect(toolLabel({ name: 'shell', args: '{"command":"python3 - <<EOF","intent":"Update the  Recommendations screen"}' })).toBe('Update the Recommendations screen')
+    expect(toolLabel({ name: 'shell', args: '{"command":"npm test","description":"Run unit tests"}' })).toBe('Run unit tests')
+    expect(toolLabel({ name: 'shell', args: '{"command":"rm -rf x"}' })).toBe('Run a step')
+    expect(toolLabel({ name: 'skill', args: '{"name":"market-scan"}' })).toBe('Use the market-scan skill')
+    expect(toolLabel({ name: 'check_ui', args: '{bad' })).toBe('Check ui')
   })
   it('peeks at the first line of a thought without markdown marks', () => {
     expect(peek('  **Plan** the # scan\nsecond')).toBe('Plan the  scan')

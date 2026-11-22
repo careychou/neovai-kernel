@@ -51,6 +51,19 @@ export default function Refresh() {
     expect(app.lastRun('recommend')).toBeNull()
   })
 
+  it('reads and saves the user preferences', async () => {
+    const saved: unknown[] = []
+    let app!: PanelApp
+    const Grab = () => { app = useApp(); return null }
+    renderToStaticMarkup(<PanelScope host={host({ prefs: { budget: 10000 }, savePrefs: (p) => { saved.push(p) } })} file="ui/P.tsx"><Grab /></PanelScope>)
+    expect(app.prefs).toEqual({ budget: 10000 })
+    await app.savePrefs!({ ...app.prefs, maxShares: 1000 })
+    expect(saved).toEqual([{ budget: 10000, maxShares: 1000 }])
+    renderToStaticMarkup(<PanelScope host={host()} file="ui/P.tsx"><Grab /></PanelScope>)
+    expect(app.prefs).toEqual({})
+    expect(app.savePrefs).toBeUndefined()
+  })
+
   it('refuses outside a panel', () => {
     const Bad = () => { useApp(); return null }
     expect(() => renderToStaticMarkup(<Bad />)).toThrow('only work inside a panel')

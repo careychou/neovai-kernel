@@ -103,10 +103,47 @@ export function summarize(_name: string, args: string): string {
   }
 }
 
-/** The label a tool row shows: the tool name and its most useful argument. */
-export function toolLabel(t: { name: string; args: string }): string {
+/** The technical label: the tool name and its most useful argument, e.g. "shell npm test". */
+export function technicalLabel(t: { name: string; args: string }): string {
   const s = summarize(t.name, t.args)
   return s ? `${t.name} ${s}` : t.name
+}
+
+const parse = (args: string): Record<string, unknown> => {
+  try { const a = JSON.parse(args); return a && typeof a === 'object' ? a : {} } catch { return {} }
+}
+const clean = (v: unknown, max = 80) => {
+  const s = typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : ''
+  return s.length > max ? s.slice(0, max - 1).trimEnd() + '…' : s
+}
+const words = (name: string) => { const w = name.replace(/[_-]+/g, ' ').trim(); return w ? w[0].toUpperCase() + w.slice(1) : 'Step' }
+
+/** Plain wording for calls that carry no intent (older chats, or a model that skipped it). */
+const FALLBACK: Record<string, (a: Record<string, unknown>) => string> = {
+  read_file: () => 'Read a file',
+  write_file: () => 'Save a file',
+  edit_file: () => 'Edit a file',
+  glob: () => 'Look for files',
+  grep: () => 'Search the files',
+  shell: () => 'Run a step',
+  read_shell: () => 'Check on a running step',
+  write_shell: () => 'Send input to a running step',
+  stop_shell: () => 'Stop a running step',
+  list_shells: () => 'List running steps',
+  web_fetch: () => 'Look something up online',
+  skill: (a) => (clean(a.name) ? `Use the ${clean(a.name)} skill` : 'Use a skill'),
+  save_data: (a) => (clean(a.name) ? `Save the ${clean(a.name)} results` : 'Save results'),
+  task: () => 'Hand off a task',
+  ask_user: () => 'Ask you a question'
+}
+
+/**
+ * The label a tool row shows, in plain words: the call's `intent`, else its `description`,
+ * else a generic phrase for the tool. Never a raw command or path.
+ */
+export function toolLabel(t: { name: string; args: string }): string {
+  const a = parse(t.args)
+  return clean(a.intent) || clean(a.description) || (FALLBACK[t.name]?.(a) ?? words(t.name))
 }
 
 /** First line of a thought, without markdown marks, cut to 90 characters. */

@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { Session, type AgentEvent, type Hooks, type ModelAdapter, type Reasoning, type ToolDef } from '../agent-loop'
+import { PLAIN_LANGUAGE_RULES, Session, type AgentEvent, type Hooks, type ModelAdapter, type Reasoning, type ToolDef } from '../agent-loop'
 import { makeFileTools } from '../file-tools'
 import { loadSkills, makeSkillTool, parseFrontMatter, skillsInstructions } from '../skills'
 import { PermissionGate } from '../approval'
@@ -81,7 +81,10 @@ export const RUNTIME_BASE = `You are the runtime agent of this app. You do the a
 - You may read anything in the workspace. You may only write under the folders listed as writable in the environment.
 - Use save_data to store structured results the screens show. Use the shapes the job describes.
 - Finish with a short report in markdown. It is saved and shown in the app.
-- You do not change the app itself: skills, instructions, screens and code are changed by the user in Codify.`
+- You do not change the app itself: skills, instructions, screens and code are changed by the user in Codify.
+- Your progress is shown live to a non-technical user: keep notes to one short plain sentence, and give every tool call a plain "intent" (no file names, code or commands).
+
+${PLAIN_LANGUAGE_RULES}`
 
 export interface RuntimeOptions {
   workspace: string
@@ -94,6 +97,8 @@ export interface RuntimeOptions {
   skillsDir?: string
   instructionsFile?: string
   goalsFile?: string
+  /** Heading the goals file appears under in the instruction. Default "Goals". */
+  goalsTitle?: string
   /** Folder for run reports and saved data. The only place the agent may write unless `writable` says otherwise. */
   recordsDir?: string
   writable?: string[]
@@ -153,7 +158,7 @@ export function createRuntime(o: RuntimeOptions) {
       o.base ?? RUNTIME_BASE,
       `# Instructions\n${readText(at(o.instructionsFile ?? 'instructions/system.md')) || '(none yet)'}`,
       `# Skills\n${skillsInstructions(loadSkills(skillsDir))}`,
-      `# Goals (read-only)\n${readText(at(o.goalsFile ?? 'goals.json')) || '(not set)'}`,
+      `# ${o.goalsTitle ?? 'Goals'} (read-only)\n${readText(at(o.goalsFile ?? 'goals.json')) || '(not set)'}`,
       `# Environment\n- Workspace: ${ws}\n- Writable: ${writable.join(', ')}\n- Saved data: ${path.relative(ws, dataDir)}\n- Platform: ${os.platform()} ${os.arch()}\n- Date: ${new Date().toISOString().slice(0, 10)}`
     ]
     if (job) parts.push(`# Job: ${job.title}\n${job.body}`)

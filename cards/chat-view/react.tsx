@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type ComponentType, type ReactNode, type Ref } from 'react'
-import { groupRows, groupState, peek, prettyArgs, toolLabel, type Item, type ToolItem } from './items'
+import { createContext, useContext, useEffect, useRef, useState, type ComponentType, type ReactNode, type Ref } from 'react'
+import { groupRows, groupState, peek, prettyArgs, technicalLabel, toolLabel, type Item, type ToolItem } from './items'
 import { ATTACH_LIMITS, classify, clipText, fitSize, type Attachment } from './attach'
 
 /** Renders markdown text. The app passes its own so links and sanitizing follow its rules. */
@@ -30,6 +30,10 @@ export function ThoughtBlock({ text, live, Markdown = Plain }: { text: string; l
   )
 }
 
+/** Whether tool rows show plain-language labels (default) or the raw tool name and argument. */
+const Technical = createContext(false)
+const labelOf = (t: ToolItem, technical: boolean) => (technical ? technicalLabel(t) : toolLabel(t))
+
 function ToolBody({ t }: { t: ToolItem }) {
   return (
     <div className="cv-tool-body">
@@ -42,14 +46,25 @@ function ToolBody({ t }: { t: ToolItem }) {
 const mark = (t: ToolItem) =>
   t.ok === undefined ? <span className="cv-spin" /> : t.ok ? <span className="cv-ok">✓</span> : <span className="cv-bad">✗</span>
 
-/** One tool call: a quiet one-line row that expands to its arguments and output. */
+/** One tool call: a quiet one-line row. Plain rows stop here; technical rows expand to arguments and output. */
 export function ToolRow({ t }: { t: ToolItem }) {
   const [open, setOpen] = useState(false)
+  const technical = useContext(Technical)
+  if (!technical) {
+    return (
+      <div className={`cv-tool${t.ok === undefined ? ' running' : ''}`}>
+        <div className="cv-tool-head cv-plainhead">
+          <span className="cv-label">{toolLabel(t)}</span>
+          {mark(t)}
+        </div>
+      </div>
+    )
+  }
   return (
     <div className={`cv-tool${t.ok === undefined ? ' running' : ''}`}>
       <button className="cv-tool-head" onClick={() => setOpen(!open)} aria-expanded={open}>
         <span className="cv-chev">{open ? '▾' : '›'}</span>
-        <span className="cv-label">{toolLabel(t)}</span>
+        <span className="cv-label">{technicalLabel(t)}</span>
         {mark(t)}
       </button>
       {open && <ToolBody t={t} />}
@@ -61,13 +76,14 @@ export function ToolRow({ t }: { t: ToolItem }) {
 export function ToolGroup({ items }: { items: ToolItem[] }) {
   const [open, setOpen] = useState(false)
   const { running, failed, lead } = groupState(items)
+  const technical = useContext(Technical)
   const n = items.length - 1
   return (
     <div className={`cv-tool${running ? ' running' : ''}`}>
       <button className="cv-tool-head" onClick={() => setOpen(!open)} aria-expanded={open}>
         <span className="cv-chev">{open ? '▾' : '›'}</span>
         <span className="cv-label">
-          {toolLabel(lead)} <span className="cv-dim">and {n} other tool call{n === 1 ? '' : 's'}</span>
+          {labelOf(lead, technical)} <span className="cv-dim">and {n} other step{n === 1 ? '' : 's'}</span>
         </span>
         {running ? <span className="cv-spin" /> : failed > 0 ? <span className="cv-bad">✗ {failed}</span> : <span className="cv-ok">✓</span>}
       </button>
@@ -76,10 +92,14 @@ export function ToolGroup({ items }: { items: ToolItem[] }) {
   )
 }
 
-/** The whole conversation: user and assistant messages, thoughts, tool rows and errors. */
-export function MessageList({ items, Markdown = Plain }: { items: Item[]; Markdown?: MarkdownView }) {
+/**
+ * The whole conversation: user and assistant messages, thoughts, tool rows and errors.
+ * Tool rows read in plain words by default, two levels at most: a group row opens to its steps, and steps do not open.
+ * Set `technical` for developer views: raw tool names, and each row expands to its arguments and output.
+ */
+export function MessageList({ items, Markdown = Plain, technical = false }: { items: Item[]; Markdown?: MarkdownView; technical?: boolean }) {
   return (
-    <>
+    <Technical.Provider value={technical}>
       {groupRows(items).map((r, i) => {
         switch (r.kind) {
           case 'user': return <UserMessage key={i} item={r} />
@@ -90,7 +110,7 @@ export function MessageList({ items, Markdown = Plain }: { items: Item[]; Markdo
           case 'error': return <div key={i} className="cv-error">{r.text}</div>
         }
       })}
-    </>
+    </Technical.Provider>
   )
 }
 

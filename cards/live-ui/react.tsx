@@ -31,6 +31,10 @@ export interface ScreenHost {
   Markdown?: MarkdownView
   /** Text of each skill by name, for `skill` blocks. */
   skillText?: Record<string, string>
+  /** The user's preferences: values only the user changes, which agents read but never write. */
+  prefs?: Record<string, unknown>
+  /** Saves the user's preferences (the whole object). Enables `savePrefs` in panels. */
+  savePrefs?: (prefs: Record<string, unknown>) => Promise<void> | void
   /** Opens the coding agent to change this screen, or one of its skills. Shows a bar on every screen. */
   codify?: (req: { screen: string; title: string; skill?: string; text?: string }) => void
 }
@@ -56,6 +60,10 @@ export interface PanelApp {
   decide?: (rec: Recommendation, decision: Decision | null) => void
   /** The recorded choice on a recommendation, if any. */
   decisionOf: (rec: Recommendation) => DecisionRecord | undefined
+  /** The user's preferences (budget, limits, rules…). Agents read them; only the user changes them. */
+  prefs: Record<string, unknown>
+  /** Saves the user's preferences, replacing the whole object. Undefined when the app does not allow it. */
+  savePrefs?: (prefs: Record<string, unknown>) => Promise<void>
   /** Opens the coding agent about this screen, optionally with text to start the request. */
   codify?: (text?: string) => void
   /** The screen and panel file this panel is on. */
@@ -86,6 +94,8 @@ function makeApp({ host, screen, title, file }: PanelCtx): PanelApp {
     lastRun: (job) => host.reports?.[job] ?? null,
     decide: host.decide,
     decisionOf: (rec) => decisions.find((d) => d.id === recKey(rec, rec.date)),
+    prefs: host.prefs ?? {},
+    savePrefs: host.savePrefs && (async (p) => { await host.savePrefs!(p) }),
     codify: host.codify && ((text?: string) => host.codify!({ screen, title, text })),
     screen, file
   }

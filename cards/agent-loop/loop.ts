@@ -2,7 +2,7 @@ import { servedModel } from './model-id'
 import type { Message, ModelAdapter, Hooks } from './types'
 import type { ToolDef, ToolContext } from './tool'
 import { Assembler } from './assemble'
-import { toSchemas } from './tool'
+import { INTENT_ARG, ownsIntent, toSchemas } from './tool'
 import type { Semaphore } from './semaphore'
 
 export interface LoopOptions {
@@ -82,6 +82,7 @@ async function runTool(o: LoopOptions, call: { id: string; function: { name: str
       throw new Error(truncated ? TRUNCATED : `invalid JSON arguments (${raw.length} chars): ${raw.slice(0, 200)}${raw.length > 200 ? '…' : ''}`)
     }
     if (typeof args !== 'object' || args === null || Array.isArray(args)) throw new Error('arguments must be a JSON object')
+    if (!ownsIntent(tool)) delete args[INTENT_ARG]
     const missing = missingArgs(tool, args)
     if (missing.length) throw new Error(truncated ? TRUNCATED : `missing required argument${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}. Call ${name} again with ${missing.length > 1 ? 'them' : 'it'} set.`)
     if (tool.permission) {
