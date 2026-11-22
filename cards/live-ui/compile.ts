@@ -3,9 +3,9 @@ import path from 'node:path'
 import { transform } from 'sucrase'
 
 /** Modules a panel may import by name. The renderer supplies them; everything else must be a relative file. */
-export const DEFAULT_EXTERNALS = ['react', 'react/jsx-runtime', 'react-dom']
+import { HOST_GLOBAL, PANEL_MODULE } from './screen'
 
-import { HOST_GLOBAL } from './screen'
+export const DEFAULT_EXTERNALS = ['react', 'react/jsx-runtime', 'react-dom', PANEL_MODULE]
 
 export { HOST_GLOBAL }
 

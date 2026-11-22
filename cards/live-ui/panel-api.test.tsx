@@ -1,0 +1,58 @@
+import { describe, it, expect, afterEach, beforeEach } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { compilePanel, HOST_GLOBAL } from './index'
+import { PanelScope, registerHostModules, useApp, type PanelApp, type ScreenHost } from './react'
+
+let ws: string
+const write = (p: string, text: string) => { fs.mkdirSync(path.dirname(path.join(ws, p)), { recursive: true }); fs.writeFileSync(path.join(ws, p), text) }
+const load = async (code: string) => (await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`)).default
+
+beforeEach(() => { ws = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pa-'))); registerHostModules() })
+afterEach(() => { fs.rmSync(ws, { recursive: true, force: true }); delete (globalThis as any)[HOST_GLOBAL] })
+
+const host = (over: Partial<ScreenHost> = {}): ScreenHost => ({
+  data: { picks: { buys: [{ ticker: 'KO', action: 'buy' }] }, decisions: { items: [{ id: '|KO|buy', ticker: 'KO', action: 'buy', decision: 'accepted', at: '2026-11-22' }] } },
+  loadPanel: async () => ({ code: null, error: null, version: 0 } as never),
+  running: ['recommend'], runStep: { recommend: 'Reading picks' }, ...over
+})
+
+describe('panel API', () => {
+  it('gives a compiled panel the app: data, run state, decisions, saved state and built-in blocks', async () => {
+    write('ui/Refresh.tsx', `import { useApp, usePanelState, Blocks } from '@neovai/panel'
+export default function Refresh() {
+  const app = useApp()
+  const [mode] = usePanelState('mode', 'reuse-scan')
+  const buys = app.get('picks.buys') as { ticker: string; action: string }[]
+  return <div>
+    <i>{mode}</i><s>{app.isRunning('recommend') ? app.step('recommend') : 'idle'}</s>
+    <u>{buys.map((b) => b.ticker + ':' + (app.decisionOf(b)?.decision ?? 'open')).join(',')}</u>
+    <Blocks blocks={[{ type: 'heading', text: 'From blocks' }]} />
+  </div>
+}`)
+    const Comp = await load(compilePanel(ws, 'ui/Refresh.tsx').code)
+    const html = renderToStaticMarkup(<PanelScope host={host()} file="ui/Refresh.tsx"><Comp /></PanelScope>)
+    expect(html).toContain('<i>reuse-scan</i>')
+    expect(html).toContain('<s>Reading picks</s>')
+    expect(html).toContain('<u>KO:accepted</u>')
+    expect(html).toContain('From blocks')
+  })
+
+  it('starts jobs with options and opens Codify about the screen it is on', () => {
+    const calls: unknown[] = []
+    let app!: PanelApp
+    const Grab = () => { app = useApp(); return null }
+    renderToStaticMarkup(<PanelScope host={host({ runJob: (j, i) => calls.push(['run', j, i]), codify: (r) => calls.push(['codify', r]) })} file="ui/R.tsx" screen="recommendations" title="Recommendations"><Grab /></PanelScope>)
+    app.run('recommend', { mode: 'reuse-scan' })
+    app.codify?.('make it one panel')
+    expect(calls).toEqual([['run', 'recommend', { mode: 'reuse-scan' }], ['codify', { screen: 'recommendations', title: 'Recommendations', text: 'make it one panel' }]])
+    expect(app.lastRun('recommend')).toBeNull()
+  })
+
+  it('refuses outside a panel', () => {
+    const Bad = () => { useApp(); return null }
+    expect(() => renderToStaticMarkup(<Bad />)).toThrow('only work inside a panel')
+  })
+})

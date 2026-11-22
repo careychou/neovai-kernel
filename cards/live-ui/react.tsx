@@ -1,7 +1,7 @@
 import * as React from 'react'
 import * as JsxRuntime from 'react/jsx-runtime'
-import { Component, useEffect, useState, type ComponentType, type ReactNode } from 'react'
-import { HOST_GLOBAL, dataDate, direction, recKey, resolveData, show, type Alert, type Block, type Decision, type DecisionRecord, type Metric, type Recommendation, type Screen } from './screen'
+import { Component, createContext, useCallback, useContext, useEffect, useState, type ComponentType, type ReactNode } from 'react'
+import { HOST_GLOBAL, PANEL_MODULE, dataDate, direction, recKey, resolveData, show, type Alert, type Block, type Decision, type DecisionRecord, type Metric, type Recommendation, type RunInput, type Screen } from './screen'
 import type { PanelResult } from './live'
 
 export type MarkdownView = ComponentType<{ text: string }>
@@ -12,7 +12,8 @@ export interface ScreenHost {
   /** Compiled panel code from the main process. */
   loadPanel: (file: string) => Promise<PanelResult>
   onPanelError?: (file: string, message: string) => void
-  runJob?: (job: string) => void
+  /** Starts a job; `input` reaches the runtime agent with the run. */
+  runJob?: (job: string, input?: RunInput) => void
   stopJob?: (job: string) => void
   running?: string[]
   /** One line on what a running job is doing now, for example the tool it is calling. */
@@ -31,12 +32,118 @@ export interface ScreenHost {
   /** Text of each skill by name, for `skill` blocks. */
   skillText?: Record<string, string>
   /** Opens the coding agent to change this screen, or one of its skills. Shows a bar on every screen. */
-  codify?: (req: { screen: string; title: string; skill?: string }) => void
+  codify?: (req: { screen: string; title: string; skill?: string; text?: string }) => void
 }
 
-/** Lets compiled panels import the app's React. Call once in the renderer; pass any other modules panels may import. */
+/** What a code panel can see and do, from `useApp()` in `@neovai/panel`. */
+export interface PanelApp {
+  /** All saved data, by name (records/data/<name>.json). */
+  data: Record<string, unknown>
+  /** Reads saved data by path, for example `get('picks.buys')`. */
+  get: (ref: string) => unknown
+  /** Extra values the app passes to every panel, for example goals. */
+  props: Record<string, unknown>
+  /** Starts a job. `input` (text or named options) reaches the runtime agent with the run. */
+  run: (job: string, input?: RunInput) => void
+  stop: (job: string) => void
+  isRunning: (job: string) => boolean
+  /** What a running job is doing now, and when it started (ms since epoch). */
+  step: (job: string) => string | undefined
+  started: (job: string) => number | undefined
+  /** The latest report of a job. */
+  lastRun: (job: string) => { text: string; finished: string; status: string } | null
+  /** Records accepting or declining a recommendation; null undoes it. Undefined when the app does not allow it. */
+  decide?: (rec: Recommendation, decision: Decision | null) => void
+  /** The recorded choice on a recommendation, if any. */
+  decisionOf: (rec: Recommendation) => DecisionRecord | undefined
+  /** Opens the coding agent about this screen, optionally with text to start the request. */
+  codify?: (text?: string) => void
+  /** The screen and panel file this panel is on. */
+  screen: string
+  file: string
+}
+
+interface PanelCtx { host: ScreenHost; screen: string; title: string; file: string; tick?: unknown }
+const PanelContext = createContext<PanelCtx | null>(null)
+
+function useCtx(): PanelCtx {
+  const c = useContext(PanelContext)
+  if (!c) throw new Error('useApp and Blocks only work inside a panel')
+  return c
+}
+
+function makeApp({ host, screen, title, file }: PanelCtx): PanelApp {
+  const decisions = ((resolveData(host.data, 'decisions.items') as DecisionRecord[] | undefined) ?? [])
+  return {
+    data: host.data,
+    get: (ref) => resolveData(host.data, ref),
+    props: host.panelProps ?? {},
+    run: (job, input) => host.runJob?.(job, input),
+    stop: (job) => host.stopJob?.(job),
+    isRunning: (job) => !!host.running?.includes(job),
+    step: (job) => host.runStep?.[job],
+    started: (job) => host.runStarted?.[job],
+    lastRun: (job) => host.reports?.[job] ?? null,
+    decide: host.decide,
+    decisionOf: (rec) => decisions.find((d) => d.id === recKey(rec, rec.date)),
+    codify: host.codify && ((text?: string) => host.codify!({ screen, title, text })),
+    screen, file
+  }
+}
+
+/** Gives children the panel API, the same as a panel block does. For apps drawing a panel component themselves, and tests. */
+export function PanelScope({ host, file, screen = '', title = '', tick, children }: { host: ScreenHost; file: string; screen?: string; title?: string; tick?: unknown; children: ReactNode }) {
+  return <PanelContext.Provider value={{ host, screen, title, file, tick }}>{children}</PanelContext.Provider>
+}
+
+/** The app API for a code panel. */
+export function useApp(): PanelApp {
+  return makeApp(useCtx())
+}
+
+const STATE_PREFIX = 'neovai-panel:'
+
+/** Like useState, but kept across reloads and restarts for this panel. Use it for choices such as a selected option or tab. */
+export function usePanelState<T>(key: string, initial: T): [T, (v: T | ((p: T) => T)) => void] {
+  const { file } = useCtx()
+  const id = `${STATE_PREFIX}${file}:${key}`
+  const [v, setV] = useState<T>(() => {
+    try { const raw = localStorage.getItem(id); return raw == null ? initial : (JSON.parse(raw) as T) } catch { return initial }
+  })
+  const set = useCallback((next: T | ((p: T) => T)) => {
+    setV((p) => {
+      const val = typeof next === 'function' ? (next as (p: T) => T)(p) : next
+      try { localStorage.setItem(id, JSON.stringify(val)) } catch { /* storage full or off: keep it in memory */ }
+      return val
+    })
+  }, [id])
+  return [v, set]
+}
+
+/** Draws built-in blocks (tables, metrics, recommendations with Accept and Decline, run buttons…) inside a panel. */
+export function Blocks({ blocks }: { blocks: Block[] }) {
+  const { host, tick, screen, title } = useCtx()
+  return <>{blocks.map((b, i) => <Boundary key={i} resetKey={tick}><BlockView b={b} host={host} tick={tick} screen={screen} title={title} /></Boundary>)}</>
+}
+
+/** A run button with live progress, the same as the run block. */
+export function RunButton({ job, label, input }: { job: string; label?: string; input?: RunInput }) {
+  return <Blocks blocks={[{ type: 'run', job, label, input }]} />
+}
+
+/** Markdown drawn the way the app draws it elsewhere. */
+export function PanelMarkdown({ text }: { text: string }) {
+  const { host } = useCtx()
+  const M = host.Markdown ?? Plain
+  return <M text={text} />
+}
+
+/** What `import ... from '@neovai/panel'` gives a panel. */
+export const panelModule = { useApp, usePanelState, Blocks, RunButton, Markdown: PanelMarkdown, show, direction, resolveData, recKey }
+
+/** Lets compiled panels import the app's React and the panel API. Call once in the renderer; pass any other modules panels may import. */
 export function registerHostModules(extra: Record<string, unknown> = {}) {
-  const mods: Record<string, unknown> = { react: React, 'react/jsx-runtime': JsxRuntime, ...extra }
+  const mods: Record<string, unknown> = { react: React, 'react/jsx-runtime': JsxRuntime, [PANEL_MODULE]: panelModule, ...extra }
   ;(globalThis as any)[HOST_GLOBAL] = (name: string) => {
     if (name in mods) return mods[name]
     throw new Error(`Panels cannot import "${name}"`)
@@ -67,7 +174,7 @@ async function importCode(code: string): Promise<ComponentType<any>> {
 }
 
 /** A code panel from the workspace. Keeps showing the last version that worked when the file breaks. */
-export function CodePanel({ file, host, tick }: { file: string; host: ScreenHost; tick?: unknown }) {
+export function CodePanel({ file, host, tick, screen = '', title = '' }: { file: string; host: ScreenHost; tick?: unknown; screen?: string; title?: string }) {
   const [state, setState] = useState<{ Comp: ComponentType<any> | null; error: string | null; version: number }>(() => {
     const c = cache.get(file)
     return { Comp: c?.Comp ?? null, error: null, version: c?.version ?? -1 }
@@ -97,7 +204,9 @@ export function CodePanel({ file, host, tick }: { file: string; host: ScreenHost
       {error && <div className="lu-error">{Comp ? 'Showing the last version that worked. ' : ''}{file}: {error}</div>}
       {Comp && (
         <Boundary resetKey={version} onError={(m) => host.onPanelError?.(file, m)}>
-          <Comp data={host.data} {...host.panelProps} />
+          <PanelScope host={host} file={file} screen={screen} title={title} tick={tick}>
+            <Comp data={host.data} {...host.panelProps} />
+          </PanelScope>
         </Boundary>
       )}
     </>
@@ -124,7 +233,7 @@ function Section({ title, children }: { title?: string; children: ReactNode }) {
 
 const Empty = () => <p className="lu-empty">No data yet. Run the job that fills it.</p>
 
-function BlockView({ b, host, tick }: { b: Block; host: ScreenHost; tick?: unknown }) {
+function BlockView({ b, host, tick, screen = '', title = '' }: { b: Block; host: ScreenHost; tick?: unknown; screen?: string; title?: string }) {
   const Markdown = host.Markdown ?? Plain
   const d = host.data
   switch (b.type) {
@@ -230,7 +339,7 @@ function BlockView({ b, host, tick }: { b: Block; host: ScreenHost; tick?: unkno
           <div className="lu-run">
             {busy
               ? <button className="danger" onClick={() => host.stopJob?.(b.job)}>Stop</button>
-              : <button className="primary" onClick={() => host.runJob?.(b.job)} disabled={!host.runJob}>{b.label ?? `Run ${b.job}`}</button>}
+              : <button className="primary" onClick={() => host.runJob?.(b.job, b.input)} disabled={!host.runJob}>{b.label ?? `Run ${b.job}`}</button>}
             {busy
               ? <RunState step={host.runStep?.[b.job]} started={host.runStarted?.[b.job]} />
               : <span className="lu-runstate">{last ? `Last run ${new Date(last.finished).toLocaleString()}${last.status !== 'completed' ? ` (${last.status})` : ''}` : 'Not run yet'}</span>}
@@ -244,13 +353,13 @@ function BlockView({ b, host, tick }: { b: Block; host: ScreenHost; tick?: unkno
       return <Section title={b.title}>{last?.text ? <Markdown text={last.text} /> : <Empty />}</Section>
     }
     case 'panel':
-      return <Section title={b.title}><CodePanel file={b.file} host={host} tick={tick} /></Section>
+      return <Section title={b.title}><CodePanel file={b.file} host={host} tick={tick} screen={screen} title={title} /></Section>
     case 'skill': {
       const text = host.skillText?.[b.name]
       return <Section title={b.title}>{text ? <div className="lu-skill"><Markdown text={text.replace(/^---[\s\S]*?\n---\n/, '')} /></div> : <p className="lu-empty">No skill named {b.name}.</p>}</Section>
     }
     case 'row':
-      return <div className="lu-row">{b.blocks.map((c, i) => <BlockView key={i} b={c} host={host} tick={tick} />)}</div>
+      return <div className="lu-row">{b.blocks.map((c, i) => <BlockView key={i} b={c} host={host} tick={tick} screen={screen} title={title} />)}</div>
   }
 }
 
@@ -279,7 +388,7 @@ export function ScreenView({ screen, name = '', errors = [], host, tick }: { scr
         </div>
       )}
       {screen?.blocks.map((b, i) => (
-        <Boundary key={i} resetKey={tick}><BlockView b={b} host={host} tick={tick} /></Boundary>
+        <Boundary key={i} resetKey={tick}><BlockView b={b} host={host} tick={tick} screen={name} title={title} /></Boundary>
       ))}
     </div>
   )

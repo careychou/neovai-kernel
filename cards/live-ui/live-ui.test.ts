@@ -36,6 +36,10 @@ describe('screen descriptions', () => {
       'blocks[3]: table needs "data" or inline items'
     ])
   })
+  it('accepts run options as text or an object', () => {
+    expect(parseScreen(JSON.stringify({ blocks: [{ type: 'run', job: 'recommend', input: { mode: 'reuse-scan' } }, { type: 'run', job: 'scan', input: 'only tech' }] })).errors).toEqual([])
+    expect(parseScreen(JSON.stringify({ blocks: [{ type: 'run', job: 'recommend', input: 3 }] })).errors).toEqual(['blocks[0]: run "input" must be text or an object'])
+  })
   it('reads data by path and formats values', () => {
     expect(resolveData({ today: { picks: [{ t: 'A' }] } }, 'today.picks.0.t')).toBe('A')
     expect(resolveData({}, 'today.x')).toBeUndefined()
@@ -67,7 +71,7 @@ describe('code panels', () => {
     write('ui/Bad.tsx', 'export default () => <div>')
     expect(() => compilePanel(ws, 'ui/Bad.tsx')).toThrow(/ui\/Bad.tsx:/)
     write('ui/Pkg.tsx', "import x from 'lodash'\nimport y from './nope'\nexport default () => [x, y]")
-    expect(() => compilePanel(ws, 'ui/Pkg.tsx')).toThrow('ui/Pkg.tsx: cannot import "lodash". Panels may import react, react/jsx-runtime, react-dom or relative workspace files.\nui/Pkg.tsx: cannot find "./nope"')
+    expect(() => compilePanel(ws, 'ui/Pkg.tsx')).toThrow('ui/Pkg.tsx: cannot import "lodash". Panels may import react, react/jsx-runtime, react-dom, @neovai/panel or relative workspace files.\nui/Pkg.tsx: cannot find "./nope"')
     expect(() => compilePanel(ws, '../out.tsx')).toThrow('outside the workspace')
   })
 })

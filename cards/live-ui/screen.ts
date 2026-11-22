@@ -1,6 +1,9 @@
 /** Name of the global a compiled panel reads its external modules (React) from. */
 export const HOST_GLOBAL = '__liveUiRequire'
 
+/** Module a panel imports its app API from: `import { useApp, usePanelState, Blocks } from '@neovai/panel'`. */
+export const PANEL_MODULE = '@neovai/panel'
+
 /**
  * A screen description: a JSON file listing blocks the app draws with built-in components.
  * Blocks that show data name it with `data: "<name>.<path>"`, read from the runtime agent's saved data.
@@ -13,11 +16,14 @@ export type Block =
   | { type: 'list'; title?: string; data?: string; items?: unknown[] }
   | { type: 'alerts'; title?: string; data?: string; items?: Alert[] }
   | { type: 'recommendations'; title?: string; data?: string; items?: Recommendation[]; decide?: boolean }
-  | { type: 'run'; job: string; label?: string }
+  | { type: 'run'; job: string; label?: string; input?: RunInput }
   | { type: 'report'; job: string; title?: string }
   | { type: 'panel'; file: string; title?: string }
   | { type: 'skill'; name: string; title?: string }
   | { type: 'row'; blocks: Block[] }
+
+/** Options a screen passes to a job run: text, or named values the runtime agent receives as JSON. */
+export type RunInput = string | Record<string, unknown>
 
 export interface Metric { label: string; value: unknown; change?: unknown; note?: string }
 export interface Alert { level?: 'info' | 'warn' | 'bad' | 'good'; text: string }
@@ -58,7 +64,10 @@ function checkBlock(b: unknown, at: string, errors: string[]) {
   switch (t) {
     case 'heading': if (!str(b.text)) errors.push(`${at}: heading needs "text"`); break
     case 'markdown': if (!str(b.text) && !str(b.data)) errors.push(`${at}: markdown needs "text" or "data"`); break
-    case 'run': case 'report': if (!str(b.job)) errors.push(`${at}: ${t} needs "job"`); break
+    case 'run': case 'report':
+      if (!str(b.job)) errors.push(`${at}: ${t} needs "job"`)
+      if (t === 'run' && b.input !== undefined && typeof b.input !== 'string' && !isObj(b.input)) errors.push(`${at}: run "input" must be text or an object`)
+      break
     case 'panel':
       if (!str(b.file) || !/\.(tsx|ts|jsx|js)$/.test(String(b.file)) || String(b.file).includes('..')) errors.push(`${at}: panel needs "file", a .tsx path inside the workspace`)
       break

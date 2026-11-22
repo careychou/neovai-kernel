@@ -25,6 +25,8 @@ export interface RunRecord {
   finished: string
   text: string
   file: string
+  /** The options the run was started with, as text. */
+  input?: string
 }
 
 const NAME = /^[a-z0-9][a-z0-9-]*$/
@@ -101,6 +103,26 @@ export interface RuntimeOptions {
   services?: Record<string, unknown>
 }
 
+/** Options a screen passes with a run: text, or named values sent as JSON. */
+export type RunInput = string | Record<string, unknown>
+
+/** The input as one line of text, or '' when there is none. */
+export function inputText(input: RunInput | undefined): string {
+  if (input == null) return ''
+  if (typeof input === 'string') return input.trim()
+  return Object.keys(input).length ? JSON.stringify(input) : ''
+}
+
+/** The first message of a run: the job, plus any options the user picked on the screen. */
+export function runMessage(job: { title: string }, input?: RunInput): string {
+  const text = inputText(input)
+  const head = `Run the "${job.title}" job now.`
+  if (!text) return head
+  return typeof input === 'string'
+    ? `${head}\n\nThe user added: ${text}`
+    : `${head}\n\nOptions the user picked on the screen (follow the job's instructions for each; if the job does not mention one, use it sensibly and say how in the report):\n${JSON.stringify(input, null, 2)}`
+}
+
 const stamp = (d: Date) => d.toISOString().replace(/[:.]/g, '-').slice(0, 19)
 const readText = (f: string) => { try { return fs.readFileSync(f, 'utf8').trim() } catch { return '' } }
 
@@ -145,11 +167,11 @@ export function createRuntime(o: RuntimeOptions) {
     const f = files.at(-1)
     if (!f) return null
     const { meta, body } = parseFrontMatter(fs.readFileSync(path.join(dir, f), 'utf8'))
-    return { runId: meta.run ?? '', job, status: (meta.status as RunRecord['status']) ?? 'completed', started: meta.started ?? '', finished: meta.finished ?? '', text: body, file: path.join(dir, f) }
+    return { runId: meta.run ?? '', job, status: (meta.status as RunRecord['status']) ?? 'completed', started: meta.started ?? '', finished: meta.finished ?? '', text: body, file: path.join(dir, f), ...(meta.input ? { input: meta.input } : {}) }
   }
 
   /** Runs one job to the end and saves its report under `<records>/runs/<job>/`. */
-  async function run(name: string, input = ''): Promise<RunRecord> {
+  async function run(name: string, input: RunInput = ''): Promise<RunRecord> {
     const job = readJob(jobsDir, name)
     if (!job) throw new Error(`No job named "${name}". Available: ${loadJobs(jobsDir).map((j) => j.name).join(', ') || 'none'}.`)
     if ([...runs.values()].some((r) => r.job === name)) throw new Error(`"${name}" is already running`)
@@ -169,13 +191,14 @@ export function createRuntime(o: RuntimeOptions) {
     })
     runs.set(runId, { job: name, session })
     try {
-      const r = await session.send(input || `Run the "${job.title}" job now.`)
+      const r = await session.send(runMessage(job, input))
       const status = r.status === 'queued' ? 'failed' : r.status
       const finished = new Date()
       fs.mkdirSync(path.join(runsDir, name), { recursive: true })
       const file = path.join(runsDir, name, `${stamp(started)}.md`)
-      fs.writeFileSync(file, `---\nrun: ${runId}\nstatus: ${status}\nstarted: ${started.toISOString()}\nfinished: ${finished.toISOString()}\n---\n${r.text}\n`)
-      return { runId, job: name, status, started: started.toISOString(), finished: finished.toISOString(), text: r.text, file }
+      const opts = inputText(input)
+      fs.writeFileSync(file, `---\nrun: ${runId}\nstatus: ${status}\nstarted: ${started.toISOString()}\nfinished: ${finished.toISOString()}\n${opts ? `input: ${opts.replace(/\s*\n\s*/g, ' ')}\n` : ''}---\n${r.text}\n`)
+      return { runId, job: name, status, started: started.toISOString(), finished: finished.toISOString(), text: r.text, file, ...(opts ? { input: opts } : {}) }
     } finally {
       runs.delete(runId)
     }

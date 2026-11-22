@@ -62,6 +62,15 @@ describe('runtime agent', () => {
     expect(events.some((e) => e.kind === 'agent_end')).toBe(true)
   })
 
+  it('passes the options picked on a screen to the agent and keeps them with the report', async () => {
+    start([say('Refreshed')])
+    const r = await rt.run('daily', { mode: 'reuse-scan', count: 10 })
+    const first = requests[0].find((m: any) => m.role === 'user')
+    expect(String(first?.content)).toContain('"mode": "reuse-scan"')
+    expect(r.input).toBe('{"mode":"reuse-scan","count":10}')
+    expect(rt.lastRun('daily')).toMatchObject({ text: 'Refreshed', input: '{"mode":"reuse-scan","count":10}' })
+  })
+
   it('picks up an edited skill on the next run without a restart', async () => {
     start([say('one'), say('two')])
     await rt.run('daily')
