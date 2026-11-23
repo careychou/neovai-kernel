@@ -11,7 +11,14 @@ export interface Skill {
   /** The instructions, without the header. */
   body: string
   file: string
+  /** Label of the folder it came from (see `loadSkillSources`). */
+  source?: string
+  /** False for skills from shared folders this app must not change. */
+  editable?: boolean
 }
+
+/** A folder of skills: the app's own (editable) or a shared one such as `.github/skills` or `~/.copilot/skills` (read-only). */
+export interface SkillSource { dir: string; label: string; editable: boolean }
 
 const NAME = /^[a-z0-9][a-z0-9-]*$/
 
@@ -48,10 +55,33 @@ export function loadSkills(dir: string): Skill[] {
     .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
 }
 
+/** Skills from several folders, in folder order. A name already taken by an earlier folder is skipped, so the app's own skill wins. */
+export function loadSkillSources(sources: SkillSource[]): Skill[] {
+  const seen = new Set<string>()
+  const out: Skill[] = []
+  for (const src of sources) {
+    for (const sk of loadSkills(src.dir)) {
+      if (seen.has(sk.name)) continue
+      seen.add(sk.name)
+      out.push({ ...sk, source: src.label, editable: src.editable })
+    }
+  }
+  return out
+}
+
+/** Writes `<dir>/<name>/SKILL.md` (an editable source only). */
+export function writeSkill(dir: string, name: string, text: string): string {
+  if (!NAME.test(name)) throw new Error(`"${name}" is not a valid skill name (lowercase letters, digits and dashes)`)
+  const file = path.join(dir, name, 'SKILL.md')
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, text.endsWith('\n') ? text : text + '\n')
+  return file
+}
+
 /** The short list that goes in the system prompt. Bodies stay on disk until the agent asks for one. */
 export function skillsPrompt(skills: Skill[]): string {
   if (!skills.length) return '(no skills yet)'
-  return skills.map((s) => `- ${s.name}: ${s.description || '(no description)'}`).join('\n')
+  return skills.map((s) => `- ${s.name}: ${s.description || '(no description)'}${s.editable === false ? ` (shared, read-only${s.source ? `: ${s.source}` : ''})` : ''}`).join('\n')
 }
 
 /** Every skill in full, in order: the block a runtime agent appends to its main instruction. */
@@ -60,8 +90,9 @@ export function skillsInstructions(skills: Skill[]): string {
   return skills.map((s) => `## Skill: ${s.name}\n${s.description ? s.description + '\n' : ''}File: ${s.file}\n\n${s.body}`).join('\n\n')
 }
 
-/** The `skill` tool: returns one skill's instructions by name. */
-export function makeSkillTool(o: { dir: string }): ToolDef {
+/** The `skill` tool: returns one skill's instructions by name, from `dir` or, with `sources`, from the first folder that has it. */
+export function makeSkillTool(o: { dir: string } | { sources: () => SkillSource[] }): ToolDef {
+  const dirs = () => ('dir' in o ? [o.dir] : o.sources().map((x) => x.dir))
   return {
     name: 'skill',
     description: 'Load the full instructions of one skill by name. Do this before doing the work the skill covers.',
@@ -73,9 +104,11 @@ export function makeSkillTool(o: { dir: string }): ToolDef {
     summarize: (a) => String(a?.name ?? ''),
     async run(a) {
       const name = String(a?.name ?? '')
-      const s = readSkill(o.dir, name)
-      if (s) return `# Skill: ${s.name}\nFile: ${s.file}\n\n${s.body}`
-      const have = loadSkills(o.dir).map((x) => x.name)
+      for (const d of dirs()) {
+        const s = readSkill(d, name)
+        if (s) return `# Skill: ${s.name}\nFile: ${s.file}\n\n${s.body}`
+      }
+      const have = [...new Set(dirs().flatMap((d) => loadSkills(d).map((x) => x.name)))]
       throw new Error(`No skill named "${name}". Available: ${have.join(', ') || 'none'}.`)
     }
   }

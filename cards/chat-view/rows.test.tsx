@@ -46,3 +46,16 @@ describe('tool rows', () => {
     expect(renderToStaticMarkup(createElement(Composer, { ...base, onPublish() {}, publishing: true }))).toMatch(/cv-publish busy"[^>]*disabled/)
   })
 })
+
+describe('session list', () => {
+  it('shows each session with rename and delete, and an untitled one by its placeholder', async () => {
+    const { SessionList } = await import('./react')
+    const html = renderToStaticMarkup(createElement(SessionList, { sessions: [{ id: 'a', title: 'Scan tech' }, { id: 'b', title: 'New chat', busy: true }], active: 'a', onSelect: () => {}, onRename: () => {}, onDelete: () => {}, onNew: () => {} }))
+    expect(html).toContain('Scan tech')
+    expect(html).toContain('New request')
+    expect(html).toContain('aria-label="Rename session"')
+    expect(html).toContain('cv-session active')
+    expect(html).toContain('cv-session busy')
+    expect(renderToStaticMarkup(createElement(SessionList, { sessions: [{ id: 'a', title: 'x' }], onSelect: () => {} }))).not.toContain('Rename')
+  })
+})

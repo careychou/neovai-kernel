@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { loadSkills, makeSkillTool, readSkill, skillsPrompt, skillsInstructions } from './index'
+import { loadSkills, loadSkillSources, makeSkillTool, readSkill, skillsPrompt, skillsInstructions, writeSkill } from './index'
 
 let dir: string
 const put = (name: string, text: string) => {
@@ -64,5 +64,31 @@ describe('skills', () => {
     expect(readSkill(dir, '.')).toBeNull()
     expect(readSkill(dir, '../x')).toBeNull()
     await expect(run('..')).rejects.toThrow('No skill named')
+  })
+})
+
+describe('skill sources', () => {
+  it('merges folders in order, the app copy winning, and marks shared ones read-only', async () => {
+    const shared = fs.mkdtempSync(path.join(os.tmpdir(), 'shared-'))
+    try {
+      put('scan', '---\ndescription: App scan\n---\nApp body')
+      fs.mkdirSync(path.join(shared, 'scan')); fs.writeFileSync(path.join(shared, 'scan', 'SKILL.md'), '---\ndescription: Shared scan\n---\nShared body')
+      fs.mkdirSync(path.join(shared, 'helper')); fs.writeFileSync(path.join(shared, 'helper', 'SKILL.md'), '---\ndescription: Helps\n---\nHelper body')
+      const sources = [{ dir, label: 'app', editable: true }, { dir: shared, label: '~/.copilot/skills', editable: false }]
+      const all = loadSkillSources(sources)
+      expect(all.map((s) => [s.name, s.description, s.editable])).toEqual([['scan', 'App scan', true], ['helper', 'Helps', false]])
+      expect(skillsPrompt(all)).toContain('helper: Helps (shared, read-only: ~/.copilot/skills)')
+      const tool = makeSkillTool({ sources: () => sources })
+      expect(await tool.run({ name: 'helper' }, {} as never)).toContain('Helper body')
+      expect(await tool.run({ name: 'scan' }, {} as never)).toContain('App body')
+      await expect(tool.run({ name: 'nope' }, {} as never)).rejects.toThrow(/scan, helper/)
+    } finally { fs.rmSync(shared, { recursive: true, force: true }) }
+  })
+
+  it('writes a skill file and refuses bad names', () => {
+    const f = writeSkill(dir, 'new-one', '---\ndescription: New\n---\nBody')
+    expect(readSkill(dir, 'new-one')?.description).toBe('New')
+    expect(fs.readFileSync(f, 'utf8').endsWith('\n')).toBe(true)
+    expect(() => writeSkill(dir, '../x', 'y')).toThrow(/valid skill name/)
   })
 })

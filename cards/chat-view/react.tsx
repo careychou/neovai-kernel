@@ -322,3 +322,69 @@ export function Composer({ value, onChange, onSend, running, onStop, placeholder
     </div>
   )
 }
+
+export interface SessionRowView { id: string; title: string; busy?: boolean }
+
+export interface SessionListProps {
+  sessions: SessionRowView[]
+  active?: string | null
+  onSelect(id: string): void
+  /** Called with the new, trimmed title; omit to hide renaming. */
+  onRename?(id: string, title: string): void
+  onDelete?(id: string): void
+  onNew?(): void
+  newLabel?: string
+  /** Title shown for a session that has none yet. */
+  untitled?: string
+}
+
+/** Pencil icon for rename. */
+export function PencilIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
+  )
+}
+
+/** The session history column: one row per chat, with rename (double-click or the pencil; Enter saves, Escape cancels) and delete. */
+export function SessionList({ sessions, active, onSelect, onRename, onDelete, onNew, newLabel = 'New request', untitled = 'New request' }: SessionListProps) {
+  const [editing, setEditing] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  const start = (s: SessionRowView) => { if (!onRename) return; setEditing(s.id); setDraft(s.title && s.title !== 'New chat' ? s.title : '') }
+  const commit = (id: string) => {
+    const t = draft.replace(/\s+/g, ' ').trim()
+    const was = sessions.find((s) => s.id === id)?.title
+    setEditing(null)
+    if (t && t !== was) onRename?.(id, t.slice(0, 120))
+  }
+  return (
+    <div className="cv-sessions">
+      {onNew && <button className="primary cv-new" onClick={onNew}>{newLabel}</button>}
+      {sessions.map((s) => (
+        <div key={s.id} className={`cv-session${s.id === active ? ' active' : ''}${s.busy ? ' busy' : ''}`} onClick={() => editing !== s.id && onSelect(s.id)} onDoubleClick={() => start(s)}>
+          {editing === s.id ? (
+            <input
+              className="cv-rename"
+              autoFocus
+              value={draft}
+              aria-label="Session name"
+              onChange={(e) => setDraft(e.target.value)}
+              onFocus={(e) => e.target.select()}
+              onBlur={() => commit(s.id)}
+              onKeyDown={(e) => { if (e.key === 'Enter') commit(s.id); else if (e.key === 'Escape') setEditing(null) }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <>
+              {s.busy && <span className="cv-spin cv-session-spin" />}
+              <span className="cv-session-title" title={s.title}>{!s.title || s.title === 'New chat' ? untitled : s.title}</span>
+              {onRename && <button className="cv-session-act" title="Rename" aria-label="Rename session" onClick={(e) => { e.stopPropagation(); start(s) }}><PencilIcon /></button>}
+              {onDelete && <button className="cv-session-act del" title="Delete" aria-label="Delete session" onClick={(e) => { e.stopPropagation(); onDelete(s.id) }}>×</button>}
+            </>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}

@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { SubAgents } from '../sub-agents'
 import { PLAIN_LANGUAGE_RULES, Session, type AgentEvent, type Hooks, type ModelAdapter, type Reasoning, type ToolDef } from '../agent-loop'
 import { makeFileTools } from '../file-tools'
-import { loadSkills, makeSkillTool, parseFrontMatter, skillsInstructions } from '../skills'
+import { loadSkillSources, loadSkills, makeSkillTool, parseFrontMatter, skillsInstructions, skillsPrompt, type SkillSource } from '../skills'
 import { PermissionGate } from '../approval'
 
 /** A Main App function: a prompt the runtime agent runs on demand, declared as `<jobsDir>/<name>.md`. */
@@ -96,6 +96,8 @@ export interface RuntimeOptions {
   base?: string
   jobsDir?: string
   skillsDir?: string
+  /** Shared, read-only skill folders (e.g. `.github/skills`, `~/.copilot/skills`): listed by name and loaded on demand, not appended in full. */
+  sharedSkills?: () => SkillSource[]
   instructionsFile?: string
   goalsFile?: string
   /** Heading the goals file appears under in the instruction. Default "Goals". */
@@ -150,10 +152,13 @@ export function createRuntime(o: RuntimeOptions) {
 
   const tools = (): ToolDef[] => [
     ...makeFileTools({ root: ws, writable, readOnly: o.readOnly }),
-    makeSkillTool({ dir: skillsDir }),
+    makeSkillTool({ sources: () => [{ dir: skillsDir, label: 'app', editable: true }, ...(o.sharedSkills?.() ?? [])] }),
     makeSaveDataTool({ dir: dataDir, locked: lockedData }),
     ...(o.tools ?? [])
   ]
+
+  const own = () => new Set(loadSkills(skillsDir).map((x) => x.name))
+  const shared = () => { const mine = own(); return loadSkillSources(o.sharedSkills?.() ?? []).filter((x) => !mine.has(x.name)) }
 
   /** The full instruction for a run, read fresh from disk. */
   function systemPrompt(job?: Job): string {
@@ -161,6 +166,7 @@ export function createRuntime(o: RuntimeOptions) {
       o.base ?? RUNTIME_BASE,
       `# Instructions\n${readText(at(o.instructionsFile ?? 'instructions/system.md')) || '(none yet)'}`,
       `# Skills\n${skillsInstructions(loadSkills(skillsDir))}`,
+      ...(shared().length ? [`# Shared skills (read-only; load one with the skill tool when the job needs it)\n${skillsPrompt(shared())}`] : []),
       `# ${o.goalsTitle ?? 'Goals'} (read-only)\n${readText(at(o.goalsFile ?? 'goals.json')) || '(not set)'}`,
       `# Environment\n- Workspace: ${ws}\n- Writable: ${writable.join(', ')}\n- Saved data: ${path.relative(ws, dataDir)}\n- Platform: ${os.platform()} ${os.arch()}\n- Date: ${new Date().toISOString().slice(0, 10)}`
     ]

@@ -62,6 +62,24 @@ describe('runtime agent', () => {
     expect(events.some((e) => e.kind === 'agent_end')).toBe(true)
   })
 
+  it('lists shared skills by name only, skips names the app has, and loads them on demand', async () => {
+    const shared = path.join(ws, '..', path.basename(ws) + '-shared')
+    for (const [n, b] of [['scan', 'SHARED-SCAN'], ['helper', 'HELPER-BODY']]) {
+      fs.mkdirSync(path.join(shared, n), { recursive: true })
+      fs.writeFileSync(path.join(shared, n, 'SKILL.md'), `---\ndescription: ${n} help.\n---\n${b}`)
+    }
+    try {
+      start([call(['skill', { name: 'helper' }]), say('ok')], { sharedSkills: () => [{ dir: shared, label: 'shared', editable: false }] })
+      await rt.run('daily')
+      const sys = requests[0][0].content as string
+      expect(sys).toContain('# Shared skills')
+      expect(sys).toContain('helper: helper help. (shared, read-only: shared)')
+      expect(sys).not.toContain('SHARED-SCAN')
+      expect(sys).not.toContain('HELPER-BODY')
+      expect(toolOutputs(requests[1])[0]).toContain('HELPER-BODY')
+    } finally { fs.rmSync(shared, { recursive: true, force: true }) }
+  })
+
   it('passes the options picked on a screen to the agent and keeps them with the report', async () => {
     start([say('Refreshed')])
     const r = await rt.run('daily', { mode: 'reuse-scan', count: 10 })
