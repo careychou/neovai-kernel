@@ -14,7 +14,7 @@ const write = (root: string, p: string, t: string) => { fs.mkdirSync(path.dirnam
 beforeEach(() => {
   dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pub-')))
   remote = path.join(dir, 'remote.git'); repo = path.join(dir, 'repo'); app = path.join(dir, 'app')
-  execFileSync('git', ['init', '-q', '--bare', remote])
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote])
   execFileSync('git', ['init', '-q', '-b', 'main', repo])
   git('config', 'user.email', 't@example.com'); git('config', 'user.name', 'T')
   git('remote', 'add', 'origin', remote)
@@ -68,6 +68,33 @@ describe('git-publish', () => {
     expect(r.commit).toBeTruthy()
     expect(git('status', '--porcelain')).toBe('')
     expect(events.at(-1)).toMatchObject({ kind: 'agent_end', status: 'failed' })
+  })
+
+  it('downloads a remote repo to a temporary folder, updates it, pushes and removes the folder', async () => {
+    const before = fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith('publish-')).length
+    const events: AgentEvent[] = []
+    const r = await publish({ url: remote, mirror: { from: app, to: 'workspace', exclude: ['records/**', '!records/README.md'] }, onEvent: (e) => events.push(e) })
+    expect(r.status).toBe('published')
+    const show = (f: string) => execFileSync('git', ['--git-dir', remote, 'show', `main:${f}`], { encoding: 'utf8' })
+    expect(show('workspace/ui/a.tsx')).toBe('a2')
+    expect(show('workspace/skills/s/SKILL.md')).toBe('s')
+    expect(() => show('workspace/old.md')).toThrow()
+    expect(() => show('workspace/records/data/x.json')).toThrow()
+    let items: Item[] = []
+    for (const e of events) items = applyEvent(items, e)
+    expect(items.filter((i) => i.kind === 'tool').map((s) => JSON.parse((s as { args: string }).args).intent)).toEqual([
+      'Download the repository', "Copy the app's changes into the repository", 'Look for changes', 'Save the changes as a commit', 'Push to the remote repository'
+    ])
+    expect(fs.readdirSync(os.tmpdir()).filter((f) => f.startsWith('publish-')).length).toBe(before)
+
+    const again = await publish({ url: remote, mirror: { from: app, to: 'workspace', exclude: ['records/**', '!records/README.md'] } })
+    expect(again.status).toBe('nothing')
+  })
+
+  it('reports a remote that cannot be downloaded', async () => {
+    const r = await publish({ url: path.join(dir, 'missing.git'), mirror: { from: app, to: 'workspace' } })
+    expect(r.status).toBe('failed')
+    expect(r.text).toMatch(/couldn't download/)
   })
 
   it('fails cleanly when the folder is not a repository', async () => {

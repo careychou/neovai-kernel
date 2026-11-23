@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import type { AgentEvent, Message, ToolCall } from '../agent-loop'
@@ -10,15 +11,20 @@ export type Runner = (cmd: string, args: string[], cwd: string) => Promise<RunRe
 export interface Mirror {
   /** The folder the app edits (e.g. its workspace in the user's data folder). */
   from: string
-  /** Where it lives in the repo. */
+  /** Where it lives in the repo; a relative path is inside the repository (needed with `url`, e.g. 'workspace'). */
   to: string
   /** Globs relative to `from` to leave out; `**` spans folders, `*` stays in one, a leading `!` keeps a path back. */
   exclude?: string[]
 }
 
 export interface PublishOptions {
-  /** The git repository folder. */
-  repo: string
+  /** A local git repository folder. Not needed with `url`. */
+  repo?: string
+  /** A remote repository (e.g. git@github.com:me/app.git). It is downloaded into a temporary folder, updated,
+   * pushed back, and the temporary folder is deleted, so no local working copy is kept. */
+  url?: string
+  /** The branch to update with `url`; the remote's default branch when omitted. */
+  branch?: string
   /** Copy an edited folder into the repo first: new and changed files are copied, removed ones deleted. */
   mirror?: Mirror
   /** Commit message; a short one naming the changed folders is made when omitted. */
@@ -144,16 +150,35 @@ export async function publish(o: PublishOptions): Promise<PublishResult> {
     emit({ kind: 'agent_end', agentId, status: status === 'failed' ? 'failed' : 'completed', finalText: text })
     return { status, text, commit, messages }
   }
-  const git = (...args: string[]) => run('git', args, o.repo)
+  if (!o.url) return publishIn(o.repo ?? '', o, step, finish, run, remote)
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'publish-'))
+  try {
+    const args = ['clone', '-q', '--depth', '1', ...(o.branch ? ['--branch', o.branch] : []), o.url, tmp]
+    const c = await step('Download the repository', `git clone --depth 1 ${o.branch ? `--branch ${o.branch} ` : ''}${o.url}`, async () => {
+      const r = await run('git', args, os.tmpdir())
+      return { ok: r.code === 0, output: r.out || `Downloaded into a temporary folder.` }
+    })
+    if (!c.ok) return finish('failed', "I couldn't download the repository. Open the step for git's reason (address, access or network).")
+    return await publishIn(tmp, o, step, finish, run, remote)
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true })
+  }
+}
 
-  const top = await step('Find the repository', 'git rev-parse --show-toplevel', async () => {
-    if (!o.repo || !fs.existsSync(o.repo)) return { ok: false, output: `Repository folder not found: ${o.repo || '(not set)'}` }
+type Step = (intent: string, command: string, fn: () => Promise<{ ok: boolean; output: string }>) => Promise<{ ok: boolean; output: string }>
+type Finish = (status: PublishResult['status'], text: string, commit?: string) => PublishResult
+
+async function publishIn(repo: string, o: PublishOptions, step: Step, finish: Finish, run: Runner, remote: string): Promise<PublishResult> {
+  const git = (...args: string[]) => run('git', args, repo)
+
+  const top = o.url ? { ok: true, output: repo } : await step('Find the repository', 'git rev-parse --show-toplevel', async () => {
+    if (!repo || !fs.existsSync(repo)) return { ok: false, output: `Repository folder not found: ${repo || '(not set)'}` }
     const r = await git('rev-parse', '--show-toplevel')
     return { ok: r.code === 0, output: r.out }
   })
-  if (!top.ok) return finish('failed', `I couldn't publish: ${o.repo ? 'that folder is not a git repository' : 'no repository folder is set'}.`)
+  if (!top.ok) return finish('failed', `I couldn't publish: ${repo ? 'that folder is not a git repository' : 'no repository is set'}.`)
 
-  const m = o.mirror
+  const m = o.mirror && { ...o.mirror, to: path.resolve(repo, o.mirror.to) }
   if (m && path.resolve(m.from) !== path.resolve(m.to)) {
     const r = await step("Copy the app's changes into the repository", `copy ${m.from} → ${m.to}`, async () => {
       const { copied, removed } = mirrorFolder(m)
@@ -178,7 +203,9 @@ export async function publish(o: PublishOptions): Promise<PublishResult> {
     const c = await step('Save the changes as a commit', `git add -A && git commit -m "${message}"`, async () => {
       const a = await git('add', '-A')
       if (a.code !== 0) return { ok: false, output: a.out }
-      const r = await git('commit', '-q', '-m', message)
+      // A fresh download has no author unless git is set up globally; fall back to a named one.
+      const who = (await git('config', 'user.email')).out.trim() ? [] : ['-c', 'user.name=Codify', '-c', 'user.email=codify@localhost']
+      const r = await git(...who, 'commit', '-q', '-m', message)
       if (r.code !== 0) return { ok: false, output: r.out }
       commit = (await git('rev-parse', '--short', 'HEAD')).out.trim()
       return { ok: true, output: `${commit} ${message}` }
@@ -192,13 +219,15 @@ export async function publish(o: PublishOptions): Promise<PublishResult> {
   if (!ahead) {
     const s = await git('status', '-sb')
     ahead = /\[ahead \d+/.test(s.out.split('\n')[0] ?? '') || !/\.\.\./.test(s.out.split('\n')[0] ?? '')
-    if (!ahead) return finish('nothing', 'Nothing to publish: the repository already matches GitHub.')
+    if (!ahead) return finish('nothing', 'Nothing to publish: the repository already matches the app.')
   }
   const p = await step('Push to the remote repository', `git push ${remote} HEAD`, async () => {
     const r = await git('push', remote, 'HEAD')
     return { ok: r.code === 0, output: r.out }
   })
-  if (!p.ok) return finish('failed', "The commit is saved on this computer, but pushing it failed. Open the last step for the reason.", commit || undefined)
+  if (!p.ok) return finish('failed', o.url
+    ? 'Pushing failed, so nothing was changed on the remote. Open the last step for the reason, then publish again.'
+    : 'The commit is saved on this computer, but pushing it failed. Open the last step for the reason.', o.url ? undefined : commit || undefined)
   const url = (await git('remote', 'get-url', remote)).out.trim().replace(/^git@([^:]+):/, 'https://$1/').replace(/\.git$/, '')
   return finish('published', changes.length
     ? `Published ${changes.length} changed file${changes.length === 1 ? '' : 's'} to ${url} (commit ${commit}).`
