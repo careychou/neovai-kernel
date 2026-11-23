@@ -134,3 +134,37 @@ describe('attachments', () => {
     expect(fromMessages([{ role: 'user', content }])[0]).toEqual({ kind: 'user', text: 'Make it look like this', images: ['data:image/png;base64,AA'], files: ['spec "v2".md'] })
   })
 })
+
+describe('sub-agents in the chat', () => {
+  const ev = (agentId: string, e: object) => ({ agentId, ...e })
+  const flow = (end: 'completed' | 'cancelled' = 'completed') => [
+    ev('main', { kind: 'tool_start', callId: 't1', name: 'task', args: '{"description":"Check prices","prompt":"p"}' }),
+    ev('main', { kind: 'tool_start', callId: 't2', name: 'task', args: '{"description":"Read news","prompt":"q"}' }),
+    ev('a1', { kind: 'agent_start', parentId: 'main', callId: 't1', name: 'general-purpose', mode: 'sync', prompt: 'p' }),
+    ev('a2', { kind: 'agent_start', parentId: 'main', callId: 't2', name: 'general-purpose', mode: 'sync', prompt: 'q' }),
+    ev('a1', { kind: 'tool_start', callId: 'x1', name: 'web_fetch', args: '{}' }),
+    ev('a2', { kind: 'text', text: 'news ' }),
+    ev('a1', { kind: 'tool_end', callId: 'x1', name: 'web_fetch', output: 'ok', ok: true }),
+    ev('a2', { kind: 'text', text: 'done' }),
+    ev('a3', { kind: 'agent_start', parentId: 'a1', callId: 'x2', name: 'general-purpose', mode: 'sync', prompt: 'r' }),
+    ev('a1', { kind: 'agent_end', status: end, finalText: '' }),
+    ev('a2', { kind: 'agent_end', status: 'completed', finalText: 'news done' })
+  ]
+
+  it('draws each sub-agent under the task step that started it, even when they run at the same time', () => {
+    const items = flow().reduce<Item[]>((s, e) => applyEvent(s, e as AgentEvent), [])
+    expect(items.map((i) => i.kind)).toEqual(['tool', 'tool'])
+    const [t1, t2] = items as ToolItem[]
+    expect(t1.agent).toMatchObject({ id: 'a1', status: 'completed' })
+    expect(t1.agent!.items).toEqual([{ kind: 'tool', callId: 'x1', name: 'web_fetch', args: '{}', output: 'ok', ok: true }])
+    expect(t2.agent!.items).toEqual([{ kind: 'assistant', text: 'news done' }])
+    expect(groupState(items as ToolItem[]).running).toBe(true)
+  })
+
+  it('a stopped sub-agent marks its step as failed once its tool returns', () => {
+    const items = [...flow('cancelled'), ev('main', { kind: 'tool_end', callId: 't1', name: 'task', output: 'Sub-agent cancelled: cancelled', ok: true }), ev('main', { kind: 'tool_end', callId: 't2', name: 'task', output: 'news done', ok: true })]
+      .reduce<Item[]>((s, e) => applyEvent(s, e as AgentEvent), [])
+    expect(groupState(items as ToolItem[])).toMatchObject({ running: false, failed: 1 })
+  })
+})
+

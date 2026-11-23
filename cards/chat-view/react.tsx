@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ComponentType, type ReactNode, type Ref } from 'react'
-import { groupRows, groupState, peek, technicalLabel, toolLabel, type Item, type ToolItem } from './items'
+import { groupRows, groupState, isRunning, peek, stepFailed, technicalLabel, toolLabel, type Item, type ToolItem } from './items'
 import { ATTACH_LIMITS, classify, clipText, fitSize, type Attachment } from './attach'
 
 /** Renders markdown text. The app passes its own so links and sanitizing follow its rules. */
@@ -32,6 +32,8 @@ export function ThoughtBlock({ text, live, Markdown = Plain }: { text: string; l
 
 /** Whether tool rows show plain-language labels (default) or the raw tool name and argument. */
 const Technical = createContext(false)
+/** The app's markdown renderer, so nested sub-agent messages draw like the main ones. */
+const MarkdownCtx = createContext<MarkdownView>(Plain)
 const labelOf = (t: ToolItem, technical: boolean) => (technical ? technicalLabel(t) : toolLabel(t))
 
 /** What a step was given, minus its plain-language `intent`: a shell command reads as `$ command`. */
@@ -62,20 +64,36 @@ export function ToolBody({ t }: { t: ToolItem }) {
 }
 
 const mark = (t: ToolItem) =>
-  t.ok === undefined ? <span className="cv-spin" /> : t.ok ? <span className="cv-ok">✓</span> : <span className="cv-bad">✗</span>
+  isRunning(t) ? <span className="cv-spin" /> : stepFailed(t) ? <span className="cv-bad">✗</span> : <span className="cv-ok">✓</span>
+
+/** A sub-agent's work under its `task` step: its own steps and answer, drawn like the main chat. */
+export function SubAgentBody({ t }: { t: ToolItem }) {
+  const a = t.agent!
+  const Markdown = useContext(MarkdownCtx)
+  const technical = useContext(Technical)
+  return (
+    <div className="cv-agent">
+      {a.items.length === 0 && a.status === 'running' && <div className="cv-detail-note">Starting…</div>}
+      <MessageList items={a.items} Markdown={Markdown} technical={technical} />
+      {a.status === 'cancelled' && <div className="cv-detail-note">Stopped</div>}
+      {a.status === 'failed' && t.output && <div className="cv-error">{t.output.replace(/^Sub-agent failed: /, '')}</div>}
+    </div>
+  )
+}
 
 /** One tool call: a one-line row (plain words by default) that opens to its input and output. */
 export function ToolRow({ t }: { t: ToolItem }) {
   const [open, setOpen] = useState(false)
   const technical = useContext(Technical)
   return (
-    <div className={`cv-tool${t.ok === undefined ? ' running' : ''}`}>
+    <div className={`cv-tool${isRunning(t) ? ' running' : ''}${t.agent ? ' agent' : ''}`}>
       <button className="cv-tool-head" onClick={() => setOpen(!open)} aria-expanded={open}>
         <span className="cv-chev">{open ? '▾' : '›'}</span>
         <span className="cv-label">{labelOf(t, technical)}</span>
+        {t.agent?.mode === 'background' && isRunning(t) && <span className="cv-dim cv-tag">in the background</span>}
         {mark(t)}
       </button>
-      {open && <ToolBody t={t} />}
+      {open && (t.agent ? <SubAgentBody t={t} /> : <ToolBody t={t} />)}
     </div>
   )
 }
@@ -103,11 +121,13 @@ export function ToolGroup({ items }: { items: ToolItem[] }) {
 /**
  * The whole conversation: user and assistant messages, thoughts, tool rows and errors.
  * Tool rows have three levels: a summary row ("<step> and N other steps") opens to its steps in plain words,
- * and each step opens to what it was given and what came back. Set `technical` to label steps with raw tool names.
+ * and each step opens to what it was given and what came back. A step that handed work to a sub-agent opens to that
+ * sub-agent's own steps and answer instead, nested the same way. Set `technical` to label steps with raw tool names.
  */
 export function MessageList({ items, Markdown = Plain, technical = false }: { items: Item[]; Markdown?: MarkdownView; technical?: boolean }) {
   return (
     <Technical.Provider value={technical}>
+     <MarkdownCtx.Provider value={Markdown}>
       {groupRows(items).map((r, i) => {
         switch (r.kind) {
           case 'user': return <UserMessage key={i} item={r} />
@@ -118,6 +138,7 @@ export function MessageList({ items, Markdown = Plain, technical = false }: { it
           case 'error': return <div key={i} className="cv-error">{r.text}</div>
         }
       })}
+     </MarkdownCtx.Provider>
     </Technical.Provider>
   )
 }

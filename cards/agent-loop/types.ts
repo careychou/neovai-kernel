@@ -44,7 +44,8 @@ export type AgentStatus = 'running' | 'completed' | 'failed' | 'cancelled'
 
 /** Events emitted by the engine; every event carries the agentId it belongs to. */
 export type AgentEvent =
-  | { kind: 'agent_start'; agentId: string; parentId: string | null; name: string; mode: 'main' | 'sync' | 'background'; prompt: string }
+  /** `callId`: the tool call that started a sub-agent, so a chat can draw it under that step. */
+  | { kind: 'agent_start'; agentId: string; parentId: string | null; name: string; mode: 'main' | 'sync' | 'background'; prompt: string; callId?: string; description?: string }
   | { kind: 'text'; agentId: string; text: string }
   | { kind: 'reasoning'; agentId: string; text: string }
   | { kind: 'assistant_done'; agentId: string; message: Message }

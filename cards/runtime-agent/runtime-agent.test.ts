@@ -16,7 +16,7 @@ let rt: Runtime
 let requests: Message[][]
 let events: AgentEvent[]
 
-function start(steps: Delta[][]) {
+function start(steps: Delta[][], over: Partial<Parameters<typeof createRuntime>[0]> = {}) {
   requests = []
   events = []
   const adapter: ModelAdapter = {
@@ -27,7 +27,7 @@ function start(steps: Delta[][]) {
       yield* s
     }
   }
-  rt = createRuntime({ workspace: ws, adapter, settings: () => ({ model: 'm' }), onEvent: (_r, _j, e) => events.push(e) })
+  rt = createRuntime({ workspace: ws, adapter, settings: () => ({ model: 'm' }), onEvent: (_r, _j, e) => events.push(e), ...over })
 }
 
 const write = (p: string, text: string) => { fs.mkdirSync(path.dirname(path.join(ws, p)), { recursive: true }); fs.writeFileSync(path.join(ws, p), text) }
@@ -94,6 +94,33 @@ describe('runtime agent', () => {
     const tool = makeSaveDataTool({ dir: path.join(ws, 'records/data'), locked: ['decisions'] })
     await expect(tool.run({ name: 'decisions', data: {} }, {} as never)).rejects.toThrow('read-only')
     await expect(tool.run({ name: 'today', data: {} }, {} as never)).resolves.toContain('today.json')
+  })
+
+  it('with subAgents, hands parts of a job to helpers that keep the write limits', async () => {
+    start([
+      call(['task', { prompt: 'Check AAPL', description: 'Check AAPL' }]),
+      call(['write_file', { path: 'skills/hack.md', content: 'x' }]),
+      say('AAPL fine'),
+      say('Report')
+    ], { subAgents: true })
+    const r = await rt.run('daily')
+    expect(r.status).toBe('completed')
+    expect(requests[0][0].content).toContain('# Helpers')
+    const child = requests[1]
+    expect(child[0].content).toContain('# Your part')
+    expect(child[0].content).toContain('MARKER-SCAN')
+    expect(toolOutputs(requests[2])[0]).toMatch(/^Error:/)
+    expect(fs.existsSync(path.join(ws, 'skills/hack.md'))).toBe(false)
+    expect(toolOutputs(requests[3])).toEqual(['AAPL fine'])
+    expect(events.find((e) => e.kind === 'agent_start')).toMatchObject({ parentId: 'main', callId: 'c0' })
+  })
+
+  it('without subAgents, runs offer no task tool', async () => {
+    let tools: string[] = []
+    const adapter: ModelAdapter = { async *stream(req) { tools = req.tools?.map((t) => t.function.name) ?? []; yield* say('ok') } }
+    rt = createRuntime({ workspace: ws, adapter, settings: () => ({ model: 'm' }) })
+    await rt.run('daily')
+    expect(tools).not.toContain('task')
   })
 
   it('refuses unknown jobs and a missing model', async () => {

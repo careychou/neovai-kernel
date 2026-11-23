@@ -12,7 +12,7 @@ export interface LoopOptions {
   sem: Semaphore
   hooks: Hooks
   tools: ToolDef[]
-  ctx: Omit<ToolContext, 'agentId' | 'signal'>
+  ctx: Omit<ToolContext, 'agentId' | 'signal' | 'callId'>
   signal: AbortSignal
   /** A function is re-read every turn, so a changed setting reaches a running chat. */
   maxTurns: number | (() => number)
@@ -90,7 +90,7 @@ async function runTool(o: LoopOptions, call: { id: string; function: { name: str
       const allowed = await o.ctx.gate.check(o.agentId, tool.permission, detail)
       if (!allowed) throw new Error('the user denied permission for this tool call')
     }
-    output = await tool.run(args, { ...o.ctx, agentId: o.agentId, signal: o.signal })
+    output = await tool.run(args, { ...o.ctx, agentId: o.agentId, signal: o.signal, callId: call.id })
   } catch (e: any) {
     ok = false
     output = `Error: ${e?.message ?? String(e)}`

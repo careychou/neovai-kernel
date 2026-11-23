@@ -1,0 +1,1 @@
+{ "name": "sub-agents", "description": "Lets an agent hand work to sub-agents with fresh context: several at once in parallel, or in the background with a notice when they finish.", "dependencies": ["agent-loop"] }

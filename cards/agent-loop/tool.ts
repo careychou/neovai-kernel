@@ -10,6 +10,8 @@ export interface ToolContext {
   agentId: string
   depth: number
   signal: AbortSignal
+  /** Id of the tool call being run. */
+  callId?: string
   hooks: Hooks
   gate: Gate
   /** Per-chat objects that cards hand to their own tools, keyed by card (e.g. `shells`). */

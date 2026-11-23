@@ -1,4 +1,4 @@
-import type { AgentEvent, Message } from '../agent-loop/types'
+import type { AgentEvent, AgentStatus, Message } from '../agent-loop/types'
 import { userView } from './attach'
 
 /** One thing the chat draws. */
@@ -6,10 +6,20 @@ export type Item =
   | { kind: 'user'; text: string; images?: string[]; files?: string[] }
   | { kind: 'reasoning'; text: string; live?: boolean }
   | { kind: 'assistant'; text: string; live?: boolean }
-  | { kind: 'tool'; callId: string; name: string; args: string; output?: string; ok?: boolean }
+  | { kind: 'tool'; callId: string; name: string; args: string; output?: string; ok?: boolean; agent?: SubAgentView }
   | { kind: 'error'; text: string }
 
 export type ToolItem = Extract<Item, { kind: 'tool' }>
+
+/** A sub-agent started by a `task` call, drawn under that step with its own steps. */
+export interface SubAgentView {
+  id: string
+  name: string
+  description?: string
+  mode: 'main' | 'sync' | 'background'
+  status: AgentStatus
+  items: Item[]
+}
 
 /** What a message list renders: single items, with runs of two or more tool calls folded into a group. */
 export type Row = Item | { kind: 'tools'; items: ToolItem[] }
@@ -48,8 +58,38 @@ const endThinking = (items: Item[]): Item[] =>
     ? items.map((i) => (i.kind === 'reasoning' && i.live ? { kind: 'reasoning', text: i.text } : i))
     : items
 
-/** Folds one live agent event into the list. Returns the same array when nothing changes. */
+/** Applies `fn` to the tool item that matches `hit`, at any depth. Returns null when none matches. */
+function updateTool(items: Item[], hit: (t: ToolItem) => boolean, fn: (t: ToolItem) => ToolItem): Item[] | null {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i]
+    if (it.kind !== 'tool') continue
+    let next: ToolItem | null = null
+    if (hit(it)) next = fn(it)
+    else if (it.agent) {
+      const inner = updateTool(it.agent.items, hit, fn)
+      if (inner) next = { ...it, agent: { ...it.agent, items: inner } }
+    }
+    if (next) return [...items.slice(0, i), next, ...items.slice(i + 1)]
+  }
+  return null
+}
+
+/**
+ * Folds one live agent event into the list. Returns the same array when nothing changes.
+ * Events from sub-agents go into the `task` step that started them (`agent_start.callId`), at any depth.
+ */
 export function applyEvent(items: Item[], e: AgentEvent): Item[] {
+  if (e.kind === 'agent_start') {
+    if (!e.parentId || !e.callId) return items
+    const view: SubAgentView = { id: e.agentId, name: e.name, mode: e.mode, status: 'running', items: [], ...(e.description ? { description: e.description } : {}) }
+    return updateTool(items, (t) => t.callId === e.callId, (t) => ({ ...t, agent: view })) ?? items
+  }
+  const nested = updateTool(items, (t) => t.agent?.id === e.agentId, (t) => {
+    const a = t.agent!
+    const inner = applyEvent(a.items, e)
+    return e.kind === 'agent_end' ? { ...t, agent: { ...a, status: e.status, items: inner } } : inner === a.items ? t : { ...t, agent: { ...a, items: inner } }
+  })
+  if (nested) return nested
   const last = items[items.length - 1]
   switch (e.kind) {
     case 'reasoning':
@@ -134,6 +174,8 @@ const FALLBACK: Record<string, (a: Record<string, unknown>) => string> = {
   skill: (a) => (clean(a.name) ? `Use the ${clean(a.name)} skill` : 'Use a skill'),
   save_data: (a) => (clean(a.name) ? `Save the ${clean(a.name)} results` : 'Save results'),
   task: () => 'Hand off a task',
+  read_agent: () => 'Check on a helper',
+  list_agents: () => 'List helpers',
   ask_user: () => 'Ask you a question'
 }
 
@@ -154,9 +196,14 @@ export function peek(text: string, max = 90): string {
 
 /** Status of a group: still running, how many failed, and which call leads the label. */
 export function groupState(items: ToolItem[]): { running: boolean; failed: number; lead: ToolItem } {
-  const running = items.find((t) => t.ok === undefined)
-  return { running: !!running, failed: items.filter((t) => t.ok === false).length, lead: running ?? items[0] }
+  const running = items.find(isRunning)
+  return { running: !!running, failed: items.filter((t) => !isRunning(t) && stepFailed(t)).length, lead: running ?? items[0] }
 }
+
+/** A step is running until its tool returns and, for a `task`, until its sub-agent ends. */
+export const isRunning = (t: ToolItem) => t.ok === undefined || t.agent?.status === 'running'
+/** The tool failed, or its sub-agent failed. A stopped sub-agent counts as failed too. */
+export const stepFailed = (t: ToolItem) => t.ok === false || (!!t.agent && t.agent.status !== 'running' && t.agent.status !== 'completed')
 
 /** Arguments as indented JSON, or the raw text when they do not parse. */
 export function prettyArgs(args: string): string {

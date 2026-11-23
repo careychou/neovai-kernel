@@ -36,6 +36,8 @@ export class Session {
   private controller: AbortController | null = null
   private sem: Semaphore
   private queue: Array<{ qid?: string; content: Message['content'] }> = []
+  private notes: string[] = []
+  private stopListeners = new Set<() => void>()
 
   constructor(private o: SessionOptions) {
     this.sem = new Semaphore(o.maxConcurrency ?? 4)
@@ -43,6 +45,8 @@ export class Session {
   }
 
   get isBusy() { return this.busy }
+  /** The model-call limiter. Sub-agents share it so the whole agent tree stays within `maxConcurrency`. */
+  get semaphore() { return this.sem }
   get history(): Message[] { return this.messages.slice(1) }
   setModel(model: string) { this.o.model = model }
   setReasoning(r: Reasoning) { this.o.reasoning = r }
@@ -67,14 +71,16 @@ export class Session {
           tools: read(this.o.tools), signal: controller.signal,
           maxTurns: () => this.o.maxTurns ?? 50, maxTokens: () => this.o.maxOutputTokens ?? 0, reasoning: this.o.reasoning ?? 'medium',
           ctx: { cwd: this.o.cwd, depth: 0, hooks, gate: this.o.gate, services: this.o.services ?? {} },
-          drainInput: () => this.drainQueue()
+          drainInput: () => this.drainQueue(),
+          drainNotifications: () => this.notes.splice(0)
         }, this.messages)
-      } while (this.queue.length)
+      } while (this.queue.length || this.notes.length)
     } catch (e: any) {
       status = e instanceof AbortedError || controller.signal.aborted ? 'cancelled' : 'failed'
       text = status === 'cancelled' ? 'cancelled' : (e?.message ?? String(e))
       if (status === 'failed') hooks.onEvent({ kind: 'error', agentId: MAIN_ID, message: text })
       this.repairHistory()
+      this.notes = []
       const dropped = this.queue.splice(0).flatMap((q) => (q.qid ? [q.qid] : []))
       if (dropped.length) hooks.onEvent({ kind: 'queue_cleared', agentId: MAIN_ID, qids: dropped })
     } finally {
@@ -92,7 +98,25 @@ export class Session {
     return i >= 0
   }
 
-  stop() { this.controller?.abort() }
+  stop() {
+    this.controller?.abort()
+    for (const fn of this.stopListeners) fn()
+  }
+
+  /** Runs `fn` whenever the user stops this conversation, e.g. to cancel background sub-agents. Returns an unsubscribe. */
+  onStop(fn: () => void): () => void {
+    this.stopListeners.add(fn)
+    return () => this.stopListeners.delete(fn)
+  }
+
+  /**
+   * Tells the agent something happened (a background sub-agent finished). It reaches the model as a
+   * <system_notification> before its next call; an idle session starts a run to handle it.
+   */
+  notify(text: string) {
+    this.notes.push(text)
+    if (!this.busy) void this.send()
+  }
 
   private drainQueue(): Message[] {
     return this.queue.splice(0).map((q) => {

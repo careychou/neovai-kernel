@@ -10,8 +10,9 @@ import skills from './skills/card.json' with { type: 'json' }
 import chatView from './chat-view/card.json' with { type: 'json' }
 import runtimeAgent from './runtime-agent/card.json' with { type: 'json' }
 import liveUi from './live-ui/card.json' with { type: 'json' }
+import subAgents from './sub-agents/card.json' with { type: 'json' }
 
 export interface CardInfo { name: string; description: string; dependencies: string[] }
 
 /** Every card in the kernel, in inventory order. */
-export const REGISTRY: CardInfo[] = [agentLoop, modelProviders, fileTools, shell, webFetch, approval, sessionStore, settings, skills, chatView, runtimeAgent, liveUi]
+export const REGISTRY: CardInfo[] = [agentLoop, modelProviders, fileTools, shell, webFetch, approval, sessionStore, settings, skills, chatView, runtimeAgent, liveUi, subAgents]

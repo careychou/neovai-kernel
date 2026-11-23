@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { SubAgents } from '../sub-agents'
 import { PLAIN_LANGUAGE_RULES, Session, type AgentEvent, type Hooks, type ModelAdapter, type Reasoning, type ToolDef } from '../agent-loop'
 import { makeFileTools } from '../file-tools'
 import { loadSkills, makeSkillTool, parseFrontMatter, skillsInstructions } from '../skills'
@@ -106,6 +107,8 @@ export interface RuntimeOptions {
   /** Extra tools, for example web fetch or a shell for scripts that skills carry. */
   tools?: ToolDef[]
   services?: Record<string, unknown>
+  /** Lets a run hand parts of a job to parallel sub-agents (`task`), e.g. one per item. They share the run's tools and write limits. */
+  subAgents?: boolean | { maxDepth?: number }
 }
 
 /** Options a screen passes with a run: text, or named values sent as JSON. */
@@ -189,11 +192,23 @@ export function createRuntime(o: RuntimeOptions) {
       requestPermission: async () => 'allow',
       askUser: async () => ''
     }
+    const gate = new PermissionGate(hooks, true)
+    const subs = o.subAgents
+      ? new SubAgents({
+          adapter: o.adapter, hooks, gate, cwd: ws, model: () => o.settings().model, tools, services: o.services,
+          system: () => `${systemPrompt(job)}\n\n# Your part\nThe runtime agent running this job gave you one part of it. Do only that part and report back; it saves the results.`,
+          background: false,
+          maxDepth: typeof o.subAgents === 'object' ? o.subAgents.maxDepth ?? 1 : 1,
+          maxTurns: () => o.settings().maxTurns ?? 30, maxOutputTokens: () => o.settings().maxOutputTokens ?? 0, reasoning: () => o.settings().reasoning ?? 'off'
+        })
+      : null
     const session = new Session({
-      adapter: o.adapter, hooks, gate: new PermissionGate(hooks, true), model: s.model, cwd: ws,
-      system: () => systemPrompt(job), tools, services: o.services,
+      adapter: o.adapter, hooks, gate, model: s.model, cwd: ws,
+      system: () => systemPrompt(job) + (subs ? `\n\n# Helpers\nFor work with independent parts (for example one per stock), hand each part to a helper with the task tool, several in the same reply so they run at the same time. Give each a complete prompt. Combine their answers yourself, then save and report.` : ''),
+      tools: () => [...tools(), ...(subs?.tools(0) ?? [])], services: o.services,
       maxConcurrency: s.maxConcurrency, maxTurns: s.maxTurns, maxOutputTokens: s.maxOutputTokens, reasoning: s.reasoning ?? 'off'
     })
+    if (subs) subs.attach(session)
     runs.set(runId, { job: name, session })
     try {
       const r = await session.send(runMessage(job, input))

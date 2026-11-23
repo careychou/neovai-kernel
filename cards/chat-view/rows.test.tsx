@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { MessageList, ToolBody, stepInput } from './react'
+import { MessageList, SubAgentBody, ToolBody, stepInput } from './react'
 
 const t = { kind: 'tool', callId: 'c1', name: 'read_file', args: '{"path":"a.txt","intent":"Read the notes"}', ok: true, output: 'hello\n' } as any
 
@@ -26,5 +26,15 @@ describe('tool rows', () => {
     expect(stepInput('{"intent":"x"}')).toBe('')
     expect(stepInput('{"a":1,"b":2}')).toContain('"a": 1')
     expect(renderToStaticMarkup(createElement(ToolBody, { t: { ...t, output: undefined, ok: undefined } }))).toContain('Running')
+  })
+  it('a task step opens to its sub-agent\'s own steps and answer', () => {
+    const task = { kind: 'tool', callId: 't', name: 'task', args: '{"description":"Check prices","prompt":"p"}', agent: { id: 'a', name: 'general-purpose', mode: 'background', status: 'running', items: [t, { kind: 'assistant', text: 'AAPL is up' }] } } as any
+    const row = renderToStaticMarkup(createElement(MessageList, { items: [task] }))
+    expect(row).toContain('Check prices')
+    expect(row).toContain('in the background')
+    expect(row).toContain('cv-spin')
+    const body = renderToStaticMarkup(createElement(SubAgentBody, { t: task }))
+    expect(body).toContain('Read the notes')
+    expect(body).toContain('AAPL is up')
   })
 })
