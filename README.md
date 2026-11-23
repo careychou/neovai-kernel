@@ -1,22 +1,24 @@
 # neovai-kernel
 
-A small agent kernel made of reusable **cards**. An app picks the cards it needs and builds its own agent from them. Neovai = neo-evolution-ai: apps that improve their own instructions, logic and UI from feedback.
+*A small set of pluggable cards that give an ordinary web or desktop app two portable agents, one that does the app's work and one that changes the app, without handing the app over to a framework.*
 
 TypeScript source package, no build step. Needs Node 22.5+ (`node:sqlite`).
 
-## Why this exists
+## Why I built this
 
-Most agent frameworks are a runtime you build *inside*: they own the process, the UI and the loop. This kernel takes the
-opposite stance. It is a **pluggable agent harness**: a set of small cards that an ordinary web or desktop app imports
-to gain agent capability, without giving up its own window, process model, routing or design.
+I kept building the same agent plumbing into every app. A model loop, file and shell tools, a chat that shows what the agent is doing, skills, sub-agents, a place to save sessions. Each app got its own copy, and each copy drifted.
 
-**1. Plug the harness in; don't move into it.** Each card is a plain TypeScript library with one import point. The app
-keeps its Electron main process or web server, its IPC or HTTP layer and its React pages, and calls the cards where it
-needs them. `compose([...])` only checks that the chosen set is complete. Take two cards for a chat assistant or all of
-them for a self-changing app.
+The agent frameworks I looked at solve this by becoming the app. They own the process, the UI and the loop, and you build inside them. That works for a demo. It gets in the way when you already have an Electron window, a web server, your own routing and your own design system.
 
-**2. One harness, two portable agents.** Every app built on the kernel gets the same two agents from the same parts
-(`agent-loop` session, tools, `skills`, `sub-agents`):
+So I went the other way. The kernel is a **pluggable agent harness**: small cards that an app imports where it needs them. Neovai stands for neo-evolution-ai, meaning apps that improve their own instructions, logic and UI from feedback.
+
+### Plug it in, don't move in
+
+Each card is a plain TypeScript library with one import point. The app keeps its Electron main process or web server, its IPC or HTTP layer and its React pages. It calls the cards where it needs them. `compose([...])` only checks that the chosen set is complete. A chat assistant might take two cards; a self-changing app takes all of them.
+
+### Two agents, one harness
+
+Here's the part I care about most. Every app built on the kernel gets the same two agents, made from the same parts (the `agent-loop` session, tools, `skills`, `sub-agents`):
 
 | | **Runtime agent** (`runtime-agent`) | **Coding agent, "Codify"** (app-built from `agent-loop`) |
 |---|---|---|
@@ -25,26 +27,27 @@ them for a self-changing app.
 | Writes | only `records/` | the workspace (except files the user owns) |
 | Shown with | run activity under a screen's run button | the full chat (`chat-view`) |
 
-Because both agents read their behavior from files (the **workspace**: `instructions/`, `skills/`, `jobs/`, `ui/`),
-they move from app to app unchanged. The app supplies only its prompt, its workspace and its screens.
+Both agents read their behavior from files in a **workspace** (`instructions/`, `skills/`, `jobs/`, `ui/`). That is what makes them portable. They move from app to app unchanged; the app supplies only its prompt, its workspace and its screens.
 
-**3. Apps that evolve while they run.** Codify edits a skill and the next run uses it. It edits a JSON screen or writes a
-`.tsx` panel, and `live-ui` compiles and shows it at once, keeping the last good version if the new one breaks. No
-rebuild, no release. Users' accept/decline feedback lands in the workspace, where Codify can turn it into better skills.
-Neo-evolution: the app improves its own instructions, logic and UI from use.
+### The app changes while it runs
 
-**4. Same harness on desktop and web.** Headless cards run in any Node process; UI cards ship separate React subpaths.
-An app defines one `Api` contract and implements it twice, an Electron preload and a fetch-plus-event-stream client,
-over one shared core. The same renderer build and the same agents then serve a desktop install or one session per
-signed-in web user.
+Codify edits a skill, and the next run uses it. It edits a JSON screen or writes a `.tsx` panel, and `live-ui` compiles and shows it at once. If the new version breaks, the last good one stays on screen. There's no rebuild and no release. When users accept or decline a recommendation, that feedback lands in the workspace too, and Codify can turn it into better skills. That loop is the "evolution" in the name.
 
-**5. Consistent agent UX for free.** The `chat-view` card gives every app the same chat: a one-line summary per
-turn that opens to plain-language steps and then to raw detail, a folding thoughts block, sub-agent trees, attachments,
-session history with rename, clickable links and a turn rail. Users learn it once.
+### Same harness on desktop and web
 
-**6. Grows by cards, not forks.** Shared features become new kernel cards, tagged and pinned by each app
-(`kernel.json`). Private or company-specific cards live in a separate repo that extends the kernel's registry, so the
-public kernel stays generic.
+Headless cards run in any Node process. Cards with UI ship their React parts under separate subpaths, so the main process never loads React. An app defines one `Api` contract and implements it twice: an Electron preload and a fetch-plus-event-stream client, over one shared core. The same window code and the same agents then serve a desktop install, or one session per signed-in web user.
+
+### One chat everywhere
+
+The `chat-view` card gives every app the same chat. Each turn starts as a one-line summary that opens to plain-language steps, and each step opens to its raw detail. There's a folding thoughts block, sub-agent trees, attachments, session history with rename, clickable links and a turn rail. Users learn it once.
+
+### It grows by cards, not forks
+
+When a feature should be shared, it becomes a new kernel card. The kernel is tagged, and each app pins a tag in its `kernel.json`. Private or company-specific cards live in a separate repo that extends the kernel's registry, so this repo stays generic.
+
+The limit is worth saying plainly. The kernel doesn't give you an app. You still write the host (the handlers behind the `Api`), the coding agent's prompt and the workspace. What you skip is rebuilding the harness each time.
+
+Here's the whole thing on one page:
 
 ```mermaid
 flowchart LR
@@ -65,7 +68,7 @@ flowchart LR
   WS -- "live reload" --> UI
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design and step-by-step wiring.
+For the full design and step-by-step wiring, read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Cards
 
@@ -90,7 +93,7 @@ Each card lives in `cards/<name>/` with `index.ts` (the only import point for he
 
 ## Use in an app
 
-For the full picture (layers, the two agents, the Api contract, step-by-step wiring, sequence diagrams and private card repos), read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+The snippets below are the short version. The [architecture guide](docs/ARCHITECTURE.md) walks through a full app.
 
 ```json
 { "dependencies": { "neovai-kernel": "file:../neovai-kernel" } }
@@ -145,10 +148,7 @@ Apps pin a tagged release of this repo.
 
 ## Use as a template
 
-Neovai Investor (`careychou/neovai-investor`) is the reference app built on these cards. To start a new
-app, copy it, rename it, keep only the cards you need, and replace its `workspace/` (instructions,
-skills, jobs, screens, panels). Add a new card here when a feature should be shared by every app;
-tag the kernel and pin the tag in the app's `kernel.json`.
+Neovai Investor (`careychou/neovai-investor`) is the reference app built on these cards. To start a new app, I copy it, rename it, keep only the cards I need, and replace its `workspace/` (instructions, skills, jobs, screens, panels). When a feature should be shared by every app, it goes here as a card. Then I tag the kernel and pin the tag in the app's `kernel.json`.
 
 ## Checks
 
