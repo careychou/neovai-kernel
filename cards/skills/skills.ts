@@ -27,9 +27,21 @@ export function parseFrontMatter(text: string): { meta: Record<string, string>; 
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(text)
   if (!m) return { meta: {}, body: text.trim() }
   const meta: Record<string, string> = {}
-  for (const line of m[1].split(/\r?\n/)) {
+  const lines = m[1].split(/\r?\n/)
+  for (let n = 0; n < lines.length; n++) {
+    const line = lines[n]
+    if (/^\s/.test(line)) continue
     const i = line.indexOf(':')
-    if (i > 0) meta[line.slice(0, i).trim()] = line.slice(i + 1).trim().replace(/^(['"])(.*)\1$/, '$2')
+    if (i <= 0) continue
+    const value = line.slice(i + 1).trim()
+    const block = /^([>|])[+-]?$/.exec(value)
+    if (block) {
+      // YAML block scalar: `>` folds the indented lines into one, `|` keeps the line breaks.
+      const parts: string[] = []
+      while (n + 1 < lines.length && (/^\s/.test(lines[n + 1]) || lines[n + 1].trim() === '')) parts.push(lines[++n].trim())
+      while (parts.length && parts[parts.length - 1] === '') parts.pop()
+      meta[line.slice(0, i).trim()] = block[1] === '|' ? parts.join('\n') : parts.join(' ').replace(/\s+/g, ' ').trim()
+    } else meta[line.slice(0, i).trim()] = value.replace(/^(['"])(.*)\1$/, '$2')
   }
   return { meta, body: m[2].trim() }
 }

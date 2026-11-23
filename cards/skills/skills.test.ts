@@ -91,4 +91,10 @@ describe('skill sources', () => {
     expect(fs.readFileSync(f, 'utf8').endsWith('\n')).toBe(true)
     expect(() => writeSkill(dir, '../x', 'y')).toThrow(/valid skill name/)
   })
+  it('reads YAML block descriptions (> folded, | literal)', () => {
+    put('folded', '---\nname: folded\ndescription: >\n  First line\n  second line.\norder: 1\n---\nBody.')
+    put('literal', '---\ndescription: |\n  One\n  Two\n---\nBody.')
+    expect(readSkill(dir, 'folded')).toMatchObject({ description: 'First line second line.', order: 1 })
+    expect(readSkill(dir, 'literal')?.description).toBe('One\nTwo')
+  })
 })
