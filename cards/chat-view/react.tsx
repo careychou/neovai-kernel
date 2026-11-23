@@ -218,6 +218,11 @@ export interface ComposerProps {
   allowAttachments?: boolean
   /** Extra controls drawn left of Send. */
   extra?: ReactNode
+  /** Shows a publish button next to attach (pair with the git-publish card); its steps should stream into the chat. */
+  onPublish?(): void
+  /** True while a publish runs: the button spins and is disabled. */
+  publishing?: boolean
+  publishTitle?: string
 }
 
 /** Paperclip icon for the attach button; draws in the current text colour. */
@@ -229,8 +234,22 @@ export function PaperclipIcon({ size = 18 }: { size?: number }) {
   )
 }
 
+/** Publish icon for the publish button: a branch with an upload arrow. */
+export function PublishIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="6" cy="18" r="2.5" />
+      <circle cx="6" cy="6" r="2.5" />
+      <path d="M6 8.5v7" />
+      <path d="M6 15.5c0-4 3-5.5 7-5.5" />
+      <path d="M18 21V11" />
+      <path d="M14.5 14.5 18 11l3.5 3.5" />
+    </svg>
+  )
+}
+
 /** The standard chat input: text box, attach button, paste and drag-and-drop of images and files, Send/Stop. */
-export function Composer({ value, onChange, onSend, running, onStop, placeholder, inputRef, allowAttachments = true, extra }: ComposerProps) {
+export function Composer({ value, onChange, onSend, running, onStop, placeholder, inputRef, allowAttachments = true, extra, onPublish, publishing, publishTitle }: ComposerProps) {
   const [atts, setAtts] = useState<Attachment[]>([])
   const [notes, setNotes] = useState<string[]>([])
   const [drag, setDrag] = useState(false)
@@ -276,6 +295,11 @@ export function Composer({ value, onChange, onSend, running, onStop, placeholder
             <button className="cv-attach" title="Attach images or files (or paste / drop them here)" aria-label="Attach files" onClick={() => picker.current?.click()} disabled={atts.length >= ATTACH_LIMITS.maxFiles}><PaperclipIcon /></button>
             <input ref={picker} type="file" multiple hidden onChange={(e) => { void add([...(e.target.files ?? [])]); e.target.value = '' }} />
           </>
+        )}
+        {onPublish && (
+          <button className={`cv-attach cv-publish${publishing ? ' busy' : ''}`} title={publishing ? 'Publishing…' : publishTitle ?? 'Publish: commit and push all changes to the repository'} aria-label="Publish changes to the repository" onClick={onPublish} disabled={publishing || running}>
+            {publishing ? <span className="cv-spin" /> : <PublishIcon />}
+          </button>
         )}
         <textarea
           ref={inputRef}

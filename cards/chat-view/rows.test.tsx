@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { MessageList, SubAgentBody, ToolBody, stepInput } from './react'
+import { Composer, MessageList, SubAgentBody, ToolBody, stepInput } from './react'
 
 const t = { kind: 'tool', callId: 'c1', name: 'read_file', args: '{"path":"a.txt","intent":"Read the notes"}', ok: true, output: 'hello\n' } as any
 
@@ -36,5 +36,13 @@ describe('tool rows', () => {
     const body = renderToStaticMarkup(createElement(SubAgentBody, { t: task }))
     expect(body).toContain('Read the notes')
     expect(body).toContain('AAPL is up')
+  })
+
+  it('shows a publish button next to attach only when the app gives onPublish', () => {
+    const base = { value: '', onChange() {}, onSend() {} }
+    expect(renderToStaticMarkup(createElement(Composer, base))).not.toContain('cv-publish')
+    const html = renderToStaticMarkup(createElement(Composer, { ...base, onPublish() {} }))
+    expect(html.indexOf('Attach files')).toBeLessThan(html.indexOf('cv-publish'))
+    expect(renderToStaticMarkup(createElement(Composer, { ...base, onPublish() {}, publishing: true }))).toMatch(/cv-publish busy"[^>]*disabled/)
   })
 })

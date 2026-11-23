@@ -1,0 +1,1 @@
+{ "name": "git-publish", "description": "One-click publish: copies an app's edited workspace into its git repo, commits and pushes, reporting each step as chat events.", "dependencies": ["agent-loop"] }
