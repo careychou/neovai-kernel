@@ -4,6 +4,69 @@ A small agent kernel made of reusable **cards**. An app picks the cards it needs
 
 TypeScript source package, no build step. Needs Node 22.5+ (`node:sqlite`).
 
+## Why this exists
+
+Most agent frameworks are a runtime you build *inside*: they own the process, the UI and the loop. This kernel takes the
+opposite stance. It is a **pluggable agent harness**: a set of small cards that an ordinary web or desktop app imports
+to gain agent capability, without giving up its own window, process model, routing or design.
+
+**1. Plug the harness in; don't move into it.** Each card is a plain TypeScript library with one import point. The app
+keeps its Electron main process or web server, its IPC or HTTP layer and its React pages, and calls the cards where it
+needs them. `compose([...])` only checks that the chosen set is complete. Take two cards for a chat assistant or all of
+them for a self-changing app.
+
+**2. One harness, two portable agents.** Every app built on the kernel gets the same two agents from the same parts
+(`agent-loop` session, tools, `skills`, `sub-agents`):
+
+| | **Runtime agent** (`runtime-agent`) | **Coding agent, "Codify"** (app-built from `agent-loop`) |
+|---|---|---|
+| Purpose | Does the app's work: runs jobs, answers questions, fills screens with data | Changes the app: its UI, logic, skills, jobs and instructions |
+| Reads | instructions, every skill, the job, fresh from disk on each run | the whole workspace, plus the list of skills and jobs |
+| Writes | only `records/` | the workspace (except files the user owns) |
+| Shown with | run activity under a screen's run button | the full chat (`chat-view`) |
+
+Because both agents read their behavior from files (the **workspace**: `instructions/`, `skills/`, `jobs/`, `ui/`),
+they move from app to app unchanged. The app supplies only its prompt, its workspace and its screens.
+
+**3. Apps that evolve while they run.** Codify edits a skill and the next run uses it. It edits a JSON screen or writes a
+`.tsx` panel, and `live-ui` compiles and shows it at once, keeping the last good version if the new one breaks. No
+rebuild, no release. Users' accept/decline feedback lands in the workspace, where Codify can turn it into better skills.
+Neo-evolution: the app improves its own instructions, logic and UI from use.
+
+**4. Same harness on desktop and web.** Headless cards run in any Node process; UI cards ship separate React subpaths.
+An app defines one `Api` contract and implements it twice, an Electron preload and a fetch-plus-event-stream client,
+over one shared core. The same renderer build and the same agents then serve a desktop install or one session per
+signed-in web user.
+
+**5. Consistent agent UX for free.** The `chat-view` card gives every app the same chat: a one-line summary per
+turn that opens to plain-language steps and then to raw detail, a folding thoughts block, sub-agent trees, attachments,
+session history with rename, clickable links and a turn rail. Users learn it once.
+
+**6. Grows by cards, not forks.** Shared features become new kernel cards, tagged and pinned by each app
+(`kernel.json`). Private or company-specific cards live in a separate repo that extends the kernel's registry, so the
+public kernel stays generic.
+
+```mermaid
+flowchart LR
+  subgraph App["Your web or desktop app"]
+    UI["Your pages + kernel React cards"]
+    Host["Your host: Api handlers"]
+  end
+  subgraph Harness["neovai-kernel cards"]
+    RT["Runtime agent"]
+    CD["Codify (coding agent)"]
+    Core["agent-loop · skills · sub-agents · tools · live-ui · session-store"]
+  end
+  WS[("Workspace files<br/>instructions · skills · jobs · ui")]
+  UI <--> Host --> RT & CD
+  RT & CD --> Core
+  RT -- "reads, writes records/" --> WS
+  CD -- "edits" --> WS
+  WS -- "live reload" --> UI
+```
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design and step-by-step wiring.
+
 ## Cards
 
 | Card | What it gives you |
