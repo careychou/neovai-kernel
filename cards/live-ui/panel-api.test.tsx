@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { compilePanel, HOST_GLOBAL } from './index'
-import { PanelScope, registerHostModules, useApp, type PanelApp, type ScreenHost } from './react'
+import { Blocks, PanelScope, registerHostModules, useApp, type PanelApp, type ScreenHost } from './react'
 
 let ws: string
 const write = (p: string, text: string) => { fs.mkdirSync(path.dirname(path.join(ws, p)), { recursive: true }); fs.writeFileSync(path.join(ws, p), text) }
@@ -83,5 +83,17 @@ export default function Refresh() {
   it('refuses outside a panel', () => {
     const Bad = () => { useApp(); return null }
     expect(() => renderToStaticMarkup(<Bad />)).toThrow('only work inside a panel')
+  })
+})
+
+describe('links in blocks', () => {
+  it('table cells link URLs and app rules and show the full text on hover', () => {
+    const links = [{ pattern: /\bT-\d+\b/, href: (k: string) => `https://t.example/${k}` }]
+    const html = renderToStaticMarkup(<PanelScope host={host({ links })} file="ui/L.tsx">
+      <Blocks blocks={[{ type: 'table', rows: [{ ticket: 'T-4', doc: 'https://d.example/p', note: 'plain' }] } as any]} />
+    </PanelScope>)
+    expect(html).toContain('href="https://t.example/T-4"')
+    expect(html).toContain('href="https://d.example/p"')
+    expect(html).toContain('title="plain"')
   })
 })

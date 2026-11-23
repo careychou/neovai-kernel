@@ -1,4 +1,5 @@
-import { createContext, useContext, useEffect, useRef, useState, type ComponentType, type ReactNode, type Ref } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ComponentType, type ReactNode, type Ref, type RefObject } from 'react'
+import { linkMarkdown, linkSegments, type LinkRule } from '../agent-loop/links'
 import { groupRows, groupState, isRunning, peek, stepFailed, technicalLabel, toolLabel, type Item, type ToolItem } from './items'
 import { ATTACH_LIMITS, classify, clipText, fitSize, type Attachment } from './attach'
 
@@ -124,14 +125,15 @@ export function ToolGroup({ items }: { items: ToolItem[] }) {
  * and each step opens to what it was given and what came back. A step that handed work to a sub-agent opens to that
  * sub-agent's own steps and answer instead, nested the same way. Set `technical` to label steps with raw tool names.
  */
-export function MessageList({ items, Markdown = Plain, technical = false }: { items: Item[]; Markdown?: MarkdownView; technical?: boolean }) {
+export function MessageList({ items, Markdown = Plain, technical = false, links }: { items: Item[]; Markdown?: MarkdownView; technical?: boolean; links?: LinkRule[] }) {
+  let turn = 0
   return (
     <Technical.Provider value={technical}>
      <MarkdownCtx.Provider value={Markdown}>
       {groupRows(items).map((r, i) => {
         switch (r.kind) {
-          case 'user': return <UserMessage key={i} item={r} />
-          case 'assistant': return <div key={i} className="cv-msg assistant"><Markdown text={r.text} /></div>
+          case 'user': return <UserMessage key={i} item={r} turn={++turn} links={links} />
+          case 'assistant': return <div key={i} className="cv-msg assistant"><Markdown text={linkMarkdown(r.text, links)} /></div>
           case 'reasoning': return <ThoughtBlock key={i} text={r.text} live={r.live} Markdown={Markdown} />
           case 'tool': return <ToolRow key={r.callId} t={r} />
           case 'tools': return <ToolGroup key={r.items[0].callId} items={r.items} />
@@ -143,18 +145,82 @@ export function MessageList({ items, Markdown = Plain, technical = false }: { it
   )
 }
 
+/** Text with bare http(s) URLs and app link rules turned into links that open in a new window. */
+export function Linked({ text, links }: { text: string; links?: LinkRule[] }) {
+  return <>{linkSegments(text, links).map((p, i) => p.href
+    ? <a key={i} className="cv-link" href={p.href} title={p.title} target="_blank" rel="noopener noreferrer">{p.text}</a>
+    : p.text)}</>
+}
+
+/**
+ * A breadcrumb rail of the user's turns along the right edge of a scrolling chat. Each tick shows "Turn N · prompt"
+ * on hover and jumps to that turn on click; the turn in view is highlighted. Place it inside a positioned parent of
+ * the scroll element; `deps` (usually the items) re-measures the ticks when the chat changes.
+ */
+export function TurnRail({ scrollRef, deps }: { scrollRef: RefObject<HTMLElement | null>; deps?: unknown }) {
+  const [turns, setTurns] = useState<{ n: number; peek: string; top: number }[]>([])
+  const [active, setActive] = useState(0)
+  const [hover, setHover] = useState<number | null>(null)
+  const nodes = () => Array.from(scrollRef.current?.querySelectorAll<HTMLElement>('[data-turn]') ?? [])
+  const measure = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const h = Math.max(el.scrollHeight, 1)
+    setTurns(nodes().map((n) => ({ n: Number(n.dataset.turn), peek: n.dataset.peek ?? '', top: offsetIn(n, el) / h })))
+  }, [scrollRef])
+  const track = useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    let cur = 0
+    for (const n of nodes()) if (offsetIn(n, el) <= el.scrollTop + 48) cur = Number(n.dataset.turn)
+    setActive(cur || (nodes().length ? 1 : 0))
+  }, [scrollRef])
+  useEffect(() => { measure(); track() }, [deps, measure, track])
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const onScroll = () => track()
+    el.addEventListener('scroll', onScroll, { passive: true })
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => { measure(); track() })
+    ro?.observe(el)
+    if (el.firstElementChild) ro?.observe(el.firstElementChild)
+    return () => { el.removeEventListener('scroll', onScroll); ro?.disconnect() }
+  }, [scrollRef, measure, track])
+  if (turns.length < 2) return null
+  const jump = (n: number) => {
+    const el = scrollRef.current
+    const t = nodes().find((x) => Number(x.dataset.turn) === n)
+    if (el && t) el.scrollTo({ top: offsetIn(t, el) - 12, behavior: 'smooth' })
+  }
+  return (
+    <nav className="cv-rail" aria-label="Conversation turns">
+      {turns.map((t) => (
+        <button key={t.n} type="button" className={`cv-tick${t.n === active ? ' on' : ''}`} style={{ top: `${(t.top * 100).toFixed(2)}%` }}
+          aria-label={`Turn ${t.n}: ${t.peek}`} onClick={() => jump(t.n)} onMouseEnter={() => setHover(t.n)} onMouseLeave={() => setHover(null)}
+          onFocus={() => setHover(t.n)} onBlur={() => setHover(null)}>
+          {hover === t.n && <span className="cv-tip" role="tooltip"><b>Turn {t.n}</b> · {t.peek}</span>}
+        </button>
+      ))}
+    </nav>
+  )
+}
+
+function offsetIn(node: HTMLElement, container: HTMLElement): number {
+  return node.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
+}
+
 /** A user message: its text, image thumbnails (click to open full size) and attached file names. */
-export function UserMessage({ item }: { item: Extract<Item, { kind: 'user' }> }) {
+export function UserMessage({ item, turn, links }: { item: Extract<Item, { kind: 'user' }>; turn?: number; links?: LinkRule[] }) {
   const [big, setBig] = useState<string | null>(null)
   return (
-    <div className="cv-msg user">
+    <div className="cv-msg user" data-turn={turn} data-peek={turn ? peek(item.text || item.files?.join(', ') || 'Attachment') : undefined}>
       {(item.images?.length || item.files?.length) ? (
         <div className="cv-atts">
           {item.images?.map((u, k) => <img key={k} className="cv-thumb" src={u} alt="Attached image" onClick={() => setBig(u)} />)}
           {item.files?.map((f, k) => <span key={k} className="cv-file">📄 {f}</span>)}
         </div>
       ) : null}
-      {item.text && <div>{item.text}</div>}
+      {item.text && <div><Linked text={item.text} links={links} /></div>}
       {big && <div className="cv-lightbox" onClick={() => setBig(null)}><img src={big} alt="Attached image, full size" /></div>}
     </div>
   )

@@ -5,6 +5,7 @@ import { HOST_GLOBAL, PANEL_MODULE, dataDate, direction, recKey, resolveData, sh
 import type { PanelResult } from './live'
 import { Chart } from './chart'
 import { chartPoints, niceTicks, xLabel } from './chart-data'
+import { linkMarkdown, linkSegments, type LinkRule } from '../agent-loop/links'
 
 export type MarkdownView = ComponentType<{ text: string }>
 
@@ -31,6 +32,8 @@ export interface ScreenHost {
   /** Extra props every code panel receives, for example the user's goals. */
   panelProps?: Record<string, unknown>
   Markdown?: MarkdownView
+  /** App link rules (for example ticket keys to a tracker). Bare http(s) URLs in cells always become links. */
+  links?: LinkRule[]
   /** Text of each skill by name, for `skill` blocks. */
   skillText?: Record<string, string>
   /** The user's preferences: values only the user changes, which agents read but never write. */
@@ -162,11 +165,23 @@ export function RunButton({ job, label, input }: { job: string; label?: string; 
 export function PanelMarkdown({ text }: { text: string }) {
   const { host } = useCtx()
   const M = host.Markdown ?? Plain
-  return <M text={text} />
+  return <M text={linkMarkdown(text, host.links)} />
+}
+
+/** A value as text, with URLs and app link rules clickable. Inside a panel it uses the app's rules unless given some. */
+export function Linked({ value, links }: { value: unknown; links?: LinkRule[] }) {
+  const c = useContext(PanelContext)
+  return <LinkedText text={show(value)} links={links ?? c?.host.links} />
+}
+
+function LinkedText({ text, links }: { text: string; links?: LinkRule[] }) {
+  return <>{linkSegments(text, links).map((p, i) => p.href
+    ? <a key={i} className="lu-link" href={p.href} title={p.title} target="_blank" rel="noopener noreferrer">{p.text}</a>
+    : p.text)}</>
 }
 
 /** What `import ... from '@neovai/panel'` gives a panel. */
-export const panelModule = { useApp, usePanelState, useFetch, Blocks, RunButton, Chart, Markdown: PanelMarkdown, show, direction, resolveData, recKey, chartPoints, niceTicks, xLabel }
+export const panelModule = { useApp, usePanelState, useFetch, Blocks, RunButton, Chart, Markdown: PanelMarkdown, Linked, show, direction, resolveData, recKey, chartPoints, niceTicks, xLabel }
 
 /**
  * Loads JSON from a URL and refreshes it every `refreshSecs` (0: only when the url changes).
@@ -288,7 +303,9 @@ function Section({ title, children }: { title?: string; children: ReactNode }) {
 const Empty = () => <p className="lu-empty">No data yet. Run the job that fills it.</p>
 
 function BlockView({ b, host, tick, screen = '', title = '' }: { b: Block; host: ScreenHost; tick?: unknown; screen?: string; title?: string }) {
-  const Markdown = host.Markdown ?? Plain
+  const M = host.Markdown ?? Plain
+  const Markdown = useCallback(({ text }: { text: string }) => <M text={linkMarkdown(text, host.links)} />, [M, host.links])
+  const L = useCallback(({ v }: { v: unknown }) => <LinkedText text={show(v)} links={host.links} />, [host.links])
   const d = host.data
   switch (b.type) {
     case 'heading': return <h2 className="lu-heading">{b.text}</h2>
@@ -305,9 +322,9 @@ function BlockView({ b, host, tick, screen = '', title = '' }: { b: Block; host:
               {items.map((m, i) => (
                 <div className="lu-metric" key={i}>
                   <span>{m.label}</span>
-                  <b>{show(m.value)}</b>
+                  <b><L v={m.value} /></b>
                   {m.change !== undefined && <em className={`lu-${direction(m.change)}`}>{show(m.change)}</em>}
-                  {m.note && <small>{m.note}</small>}
+                  {m.note && <small><L v={m.note} /></small>}
                 </div>
               ))}
             </div>
@@ -324,7 +341,7 @@ function BlockView({ b, host, tick, screen = '', title = '' }: { b: Block; host:
             <div className="lu-tablewrap">
               <table className="lu-table">
                 <thead><tr>{cols.map((c) => <th key={c}>{c}</th>)}</tr></thead>
-                <tbody>{rows.map((r, i) => <tr key={i}>{cols.map((c) => <td key={c}>{show(r?.[c])}</td>)}</tr>)}</tbody>
+                <tbody>{rows.map((r, i) => <tr key={i}>{cols.map((c) => <td key={c} title={show(r?.[c]) || undefined}><L v={r?.[c]} /></td>)}</tr>)}</tbody>
               </table>
             </div>
           ) : <Empty />}
@@ -333,7 +350,7 @@ function BlockView({ b, host, tick, screen = '', title = '' }: { b: Block; host:
     }
     case 'list': {
       const items = pick<unknown>(b, d)
-      return <Section title={b.title}>{items.length ? <ul className="lu-list">{items.map((x, i) => <li key={i}>{show(x)}</li>)}</ul> : <Empty />}</Section>
+      return <Section title={b.title}>{items.length ? <ul className="lu-list">{items.map((x, i) => <li key={i}><L v={x} /></li>)}</ul> : <Empty />}</Section>
     }
     case 'alerts': {
       const items = pick<Alert | string>(b, d)

@@ -59,3 +59,21 @@ describe('session list', () => {
     expect(renderToStaticMarkup(createElement(SessionList, { sessions: [{ id: 'a', title: 'x' }], onSelect: () => {} }))).not.toContain('Rename')
   })
 })
+
+describe('links and turns', () => {
+  const rule = { pattern: /\bT-\d+\b/, href: (k: string) => `https://t.example/${k}` }
+  it('user text links URLs and app rules, and carries its turn for the rail', () => {
+    const html = renderToStaticMarkup(createElement(MessageList, { links: [rule], items: [
+      { kind: 'user', text: 'look at T-7 and https://a.example' }, { kind: 'assistant', text: 'ok' }, { kind: 'user', text: 'second' }
+    ] as any }))
+    expect(html).toContain('href="https://t.example/T-7"')
+    expect(html).toContain('href="https://a.example"')
+    expect(html).toContain('data-turn="2"')
+    expect(html).toContain('data-peek="second"')
+  })
+  it('assistant markdown gets app rules as markdown links', () => {
+    const Md = ({ text }: { text: string }) => createElement('pre', null, text)
+    const html = renderToStaticMarkup(createElement(MessageList, { links: [rule], Markdown: Md, items: [{ kind: 'assistant', text: 'see T-9' }] as any }))
+    expect(html).toContain('[T-9](https://t.example/T-9)')
+  })
+})
