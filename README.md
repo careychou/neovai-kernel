@@ -27,6 +27,8 @@ Each card lives in `cards/<name>/` with `index.ts` (the only import point for he
 
 ## Use in an app
 
+For the full picture (layers, the two agents, the Api contract, step-by-step wiring, sequence diagrams and private card repos), read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 ```json
 { "dependencies": { "neovai-kernel": "file:../neovai-kernel" } }
 ```
