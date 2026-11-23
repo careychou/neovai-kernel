@@ -45,7 +45,7 @@ const PATH = ['/usr/bin', '/usr/local/bin', '/opt/homebrew/bin', process.env.PAT
 export const runCommand: Runner = (cmd, args, cwd) =>
   new Promise((resolve) => {
     execFile(cmd, args, { cwd, env: { ...process.env, PATH, GIT_TERMINAL_PROMPT: '0' }, maxBuffer: 8 << 20, timeout: 120_000 }, (err, stdout, stderr) => {
-      const out = `${stdout ?? ''}${stderr ?? ''}`.trim()
+      const out = `${stdout ?? ''}${stderr ?? ''}`.trimEnd()
       resolve({ code: err ? (typeof (err as { code?: unknown }).code === 'number' ? (err as { code: number }).code : 1) : 0, out: out || (err ? String(err.message) : '') })
     })
   })
@@ -104,7 +104,8 @@ export function mirrorFolder(m: Mirror): { copied: string[]; removed: string[] }
 export function describeChanges(lines: string[], base = ''): string {
   const areas = new Set<string>()
   for (const l of lines) {
-    let p = l.slice(3).replace(/^"|"$/g, '')
+    // The status code is 1-2 letters plus a space; a trimmed first line may have lost its leading space.
+    let p = l.replace(/^[ MADRCTU?!]{1,2} /, '').replace(/^"|"$/g, '')
     if (p.includes(' -> ')) p = p.split(' -> ')[1]
     if (base && p.startsWith(base + '/')) p = p.slice(base.length + 1)
     areas.add(p.includes('/') ? p.split('/')[0] : p)

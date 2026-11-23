@@ -82,6 +82,7 @@ describe('git-publish', () => {
     expect(excluded('.vite/deps/a.js', ['.vite/**'])).toBe(true)
     expect(excluded('ui/a.tsx', ['*.json'])).toBe(false)
     expect(describeChanges([' M workspace/ui/a.tsx', '?? workspace/skills/s/SKILL.md', ' D workspace/old.md'], 'workspace')).toBe('update ui, skills, old.md (3 files)')
+    expect(describeChanges(['M workspace/jobs/a.md', 'M  workspace/logic/b.ts'], 'workspace')).toBe('update jobs, logic (2 files)')
     expect(mirrorFolder({ from: app, to: app }).copied).toEqual([])
   })
 })
