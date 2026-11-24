@@ -1,0 +1,1 @@
+{ "name": "context-memory", "description": "Just-in-time recall of earlier chat turns (search tool and prompt hints) and compaction of long chats into a summary.", "dependencies": ["agent-loop", "session-store"] }

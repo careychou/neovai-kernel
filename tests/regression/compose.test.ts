@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { compose, REGISTRY } from '../../compose'
 
-const ALL = ['agent-loop', 'model-providers', 'file-tools', 'shell', 'web-fetch', 'approval', 'session-store', 'settings', 'skills', 'chat-view', 'runtime-agent', 'live-ui', 'sub-agents', 'git-publish']
+const ALL = ['agent-loop', 'model-providers', 'file-tools', 'shell', 'web-fetch', 'approval', 'session-store', 'settings', 'skills', 'chat-view', 'runtime-agent', 'live-ui', 'sub-agents', 'git-publish', 'context-memory']
 const cardsDir = path.join(__dirname, '../../cards')
 
 describe('compose', () => {

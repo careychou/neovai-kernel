@@ -30,6 +30,9 @@ export interface SessionOptions {
 export interface SendResult { status: 'completed' | 'failed' | 'cancelled' | 'queued'; text: string }
 
 /** One conversation with one agent: a prompt queue around runLoop. */
+/** What Session.exclusive hands to its callback. */
+export interface SessionAccess { adapter: ModelAdapter; model: string; hooks: Hooks; history: Message[]; replace(next: Message[]): void }
+
 export class Session {
   readonly messages: Message[]
   private busy = false
@@ -52,11 +55,24 @@ export class Session {
   setReasoning(r: Reasoning) { this.o.reasoning = r }
 
   /**
+   * Runs `fn` while the session is held busy, with the adapter and a way to replace the history.
+   * For work that rewrites the conversation between runs (e.g. compaction). Throws if a run is in progress.
+   */
+  async exclusive<T>(fn: (a: SessionAccess) => Promise<T>): Promise<T> {
+    if (this.busy) throw new Error('session is busy')
+    this.busy = true
+    try {
+      return await fn({ adapter: this.o.adapter, model: this.o.model, hooks: this.o.hooks, history: this.history, replace: (next) => { this.messages.splice(1, this.messages.length - 1, ...next) } })
+    } finally { this.busy = false }
+  }
+
+  /**
    * Sends a user prompt and runs the loop. While a run is in progress the prompt is queued instead:
    * it joins the conversation before the next model call, or starts the next run.
+   * `hints` is harness-added context placed after the prompt (see buildUserContent).
    */
-  async send(prompt?: string, attachments: Attachment[] = [], qid?: string): Promise<SendResult> {
-    if (prompt || attachments.length) this.queue.push({ qid, content: buildUserContent(prompt ?? '', attachments) as Message['content'] })
+  async send(prompt?: string, attachments: Attachment[] = [], qid?: string, hints = ''): Promise<SendResult> {
+    if (prompt || attachments.length) this.queue.push({ qid, content: buildUserContent(prompt ?? '', attachments, hints) as Message['content'] })
     if (this.busy) return { status: 'queued', text: '' }
     this.busy = true
     const controller = (this.controller = new AbortController())

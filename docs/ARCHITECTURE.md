@@ -41,13 +41,15 @@ flowchart TB
     RA["runtime-agent"]
     LUC["live-ui"]
     GP["git-publish"]
+    CM["context-memory"]
   end
   WS[("Workspace folder<br/>instructions/ · skills/ · jobs/ · ui/ · records/ · goals.json")]
 
   APPUI --> CV & LU & SK
   APPUI <-->|"preload IPC or fetch + event stream"| API
   API --> AG & RT & UI & PUB
-  AG --> AL & FT & SH & WF & AP & SS & SKC & SA
+  AG --> AL & FT & SH & WF & AP & SS & SKC & SA & CM
+  CM --> SS
   RT --> RA --> AL
   UI --> LUC
   PUB --> GP
@@ -80,6 +82,7 @@ Four ideas hold this together.
 | `live-ui` | Node + React | agent-loop | JSON screens and runtime-compiled `.tsx` panels, `check_ui` tool, `ScreenView`, `@neovai/panel` |
 | `chat-view` | React (+ Node view model) | agent-loop | Event-to-item view model (`applyEvent`, `fromMessages`) and the chat components |
 | `git-publish` | Node | agent-loop | Copies the workspace into a repository (a temporary clone of a remote one), commits, pushes, streams each step as chat events |
+| `context-memory` | Node | agent-loop, session-store | `ContextMemory`: indexes every turn in the store's SQLite file, the `recall` tool, prompt hints attached after the prompt, compaction of older turns into a summary (manual or automatic) |
 
 You only take what you need. A chat-only assistant needs `agent-loop`, `model-providers`, `settings`, `session-store`, `chat-view` and a few tools. An app with screens and jobs adds `runtime-agent` and `live-ui`.
 

@@ -88,6 +88,7 @@ For the full design and step-by-step wiring, read [docs/ARCHITECTURE.md](docs/AR
 | `live-ui` | Screens that change while the app runs: JSON descriptions (`ui/screens/<name>.json`) drawn with built-in blocks, and `.tsx` code panels compiled at runtime with the last good version kept; `check_ui` tool for the coding agent; Accept/Decline on recommendation blocks (`decide: true`, saved by `decide()` to `decisions.json`); run blocks show elapsed time, the current step and live activity. A screen may list the `skills` it is built on; a `skill` block shows a skill's text; with `host.codify` every screen gets a bar to change it or open its skills. Panels are interactive through `@neovai/panel` (`useApp`: data, `run(job, input)`, stop, progress, last report, `decide`, `codify`; `usePanelState`; `Blocks`, `RunButton`, `Markdown`); apps add allowed libraries with `registerHostModules(extra)` and `externals`. `run` blocks take `input`. Panels read the user's preferences (`prefs`) and save them (`savePrefs`) when the host passes `prefs`/`savePrefs`. Since 0.9.0: a `chart` block and `<Chart>` component (trading-style SVG candlesticks, line, area, bar, volume pane, last-price tag, hover O/H/L/C); live data in panels through `host.fetch` (main-process `panelFetch`: GET, http/https, size and time caps) as `useFetch(url, refreshSecs)` and `useApp().fetchJson/fetchText`; panels may import plain `.css` files (injected as style tags) and split into many relative files. Since 0.15.0, `host.links` (`LinkRule[]`): URLs and app patterns in table, list and metric cells and in markdown blocks become links, table cells show their full text on hover, and panels get `Linked` from `@neovai/panel`. `linkSegments`/`linkMarkdown` are exported from `agent-loop`. React side from `neovai-kernel/cards/live-ui/react`; styles from `.../styles.css` |
 | `sub-agents` | Since 0.11.0. `SubAgents` gives an agent `task`, `read_agent` and `list_agents`: a sub-agent starts with fresh context (only the prompt it is given) and hands back only its final answer. Several `task` calls in one reply run **in parallel**, bounded by the session's shared semaphore (held only while a model streams, so nested agents never deadlock). `mode: "background"` returns an id at once; when the sub-agent ends, the parent gets a `<system_notification>` and an idle main agent wakes up (`Session.notify`). Named roles (`agents: [{name, description, system, tools?}]`), a depth limit (`maxDepth`, default 2), and Stop cancels the whole tree (`attach(session)`). `agent_start` carries the `callId` of its `task` step, so `chat-view` draws each sub-agent's own steps and answer under that step, at any depth |
 | `git-publish` | Since 0.12.0. One-click publish: `publish({url | repo, mirror?, onEvent})`. With `url` (since 0.13.0) it downloads the remote repository into a temporary folder, updates and pushes it, then deletes the folder, so no local working copy is needed; with `repo` it uses a local one. It copies the folder the app edits into the repository (`mirror: {from, to, exclude}`, `to` relative to the repository: new and changed files copied, removed ones deleted, globs such as `records/**` left out), then commits (a message naming the changed folders) and pushes. Every step is emitted as a plain-language `shell` step through `onEvent`, so a `chat-view` list shows the progress live, and the result's `messages` can be saved to the chat. A failed push keeps the commit and shows git's reason. `Composer onPublish` draws the publish button next to attach |
+| `context-memory` | Since 0.16.0. Just-in-time recall and compaction for long chats. Every turn is indexed in the store's SQLite file (full-text search, no embeddings). A `recall` tool lets the model search earlier turns of this chat, chats of the same folder, all chats, or one chat by name; `RECALL_PROMPT` tells it when to. With hints on, `send` attaches up to four one-line pointers to matching earlier turns after the prompt, so the cached prefix is unchanged, and only on a strong match. `compact` replaces older turns with a summary (keep, summarize or drop per turn; `analyze` suggests a plan; `send` can do it automatically past a token limit); removed turns stay searchable under their original turn number |
 
 Each card lives in `cards/<name>/` with `index.ts` (the only import point for headless code), `card.json` and tests. Cards with UI also ship `react.tsx` and `styles.css`, imported by their own subpaths so `index.ts` stays loadable in Node.
 
@@ -142,6 +143,20 @@ import { SkillList } from 'neovai-kernel/cards/skills/react'
 // main process: the app's skills first, then shared read-only folders
 const sources = [{ dir: 'workspace/skills', label: 'Workspace', editable: true }, { dir: '~/.copilot/skills', label: '~/.copilot/skills', editable: false }]
 createRuntime({ ..., sharedSkills: () => sources.slice(1) })
+```
+
+Recall and compaction (long chats):
+
+```ts
+import { ContextMemory, RECALL_PROMPT } from 'neovai-kernel/cards/context-memory'
+
+const mem = new ContextMemory({ store, session: (id) => sessions.get(id), hints: () => settings.recallHints })
+const session = new Session({ ..., system: system + '\n\n' + RECALL_PROMPT, tools: [...tools, mem.tool(chatId)] })
+
+await mem.send(chatId, session, prompt, { auto: { mode: 'auto', threshold: 120_000, hardLimit: 160_000, idleMinutes: 5, keepRecent: 6, minGain: 20_000 }, onCompact: (r) => notify(chatId, r) })
+await mem.compact(chatId, session, plan) // plan from the user, or from mem.analyze(session)
+void mem.backfill()                      // once at startup: index chats saved before the card was added
+mem.index.forget(chatId)                 // when a chat is deleted
 ```
 
 Apps pin a tagged release of this repo.

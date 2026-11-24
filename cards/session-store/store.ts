@@ -24,6 +24,9 @@ export class Store {
     `)
   }
 
+  /** The open database, for cards that keep their own tables next to the chats. */
+  get database(): DatabaseSync { return this.db }
+
   close() { this.db.close() }
 
   addUsage(u: UsageRec) {
