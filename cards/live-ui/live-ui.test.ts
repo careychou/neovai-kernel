@@ -163,3 +163,30 @@ describe('decisions', () => {
     expect((ui.data().decisions as any).items).toHaveLength(1)
   })
 })
+
+describe('workspace watch', () => {
+  it('survives folders being removed and recreated while watched (a skill pack reinstall)', async () => {
+    for (let i = 0; i < 20; i++) write(`.github/skills/s${i}/assets/a.md`, 'x')
+    let changes = 0
+    const ui = createLiveUi({ workspace: ws, onChange: () => { changes++ } })
+    ui.watch()
+    const errors: unknown[] = []
+    const onErr = (e: unknown) => errors.push(e)
+    process.on('uncaughtException', onErr)
+    try {
+      for (let round = 0; round < 5; round++) {
+        fs.rmSync(path.join(ws, '.github'), { recursive: true, force: true })
+        for (let i = 0; i < 20; i++) write(`.github/skills/s${i}/assets/a.md`, String(round))
+        await new Promise((r) => setTimeout(r, 30))
+      }
+      await new Promise((r) => setTimeout(r, 1300))
+      expect(errors).toEqual([])
+      write('ui/screens/x.json', '{}')
+      await new Promise((r) => setTimeout(r, 400))
+      expect(changes).toBeGreaterThan(0)
+    } finally {
+      process.off('uncaughtException', onErr)
+      ui.dispose()
+    }
+  })
+})

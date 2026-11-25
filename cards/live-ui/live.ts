@@ -132,8 +132,10 @@ export function createLiveUi(o: LiveUiOptions) {
     return items
   }
 
+  let restart: ReturnType<typeof setTimeout> | null = null
+  let disposed = false
   function watch() {
-    if (watcher || !o.onChange) return
+    if (watcher || !o.onChange || disposed) return
     try {
       watcher = fs.watch(ws, { recursive: true }, (_e, f) => {
         const name = String(f ?? '')
@@ -141,13 +143,20 @@ export function createLiveUi(o: LiveUiOptions) {
         if (timer) clearTimeout(timer)
         timer = setTimeout(() => o.onChange?.(), 150)
       })
+      // On Linux, Node's recursive watch emits ENOENT when a folder is removed mid-scan (e.g. a skill pack
+      // reinstall). Unhandled, that error kills the process; instead re-watch once the tree settles.
+      watcher.on('error', () => {
+        watcher?.close(); watcher = null
+        if (restart) clearTimeout(restart)
+        restart = setTimeout(() => { restart = null; watch(); o.onChange?.() }, 1000)
+      })
     } catch { /* watching is best effort */ }
   }
 
   return {
     screensDir, dataDir,
     screens, data, panel, reportError, check, watch, decide,
-    dispose() { watcher?.close(); watcher = null; if (timer) clearTimeout(timer) }
+    dispose() { disposed = true; watcher?.close(); watcher = null; if (timer) clearTimeout(timer); if (restart) clearTimeout(restart) }
   }
 }
 
