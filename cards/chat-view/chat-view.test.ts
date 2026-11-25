@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentEvent, Message } from '../agent-loop/types'
-import { applyEvent, fromMessages, groupRows, groupState, peek, prettyArgs, summarize, technicalLabel, toolLabel, type Item, type ToolItem } from './index'
+import { applyChatEvent, queuedView, restoreDraft, type QueuedPrompt, applyEvent, fromMessages, groupRows, groupState, peek, prettyArgs, summarize, technicalLabel, toolLabel, type Item, type ToolItem } from './index'
 
 const call = (id: string, name: string, args: object) =>
   ({ id, type: 'function' as const, function: { name, arguments: JSON.stringify(args) } })
@@ -61,6 +61,46 @@ describe('applyEvent', () => {
     const before: Item[] = [{ kind: 'user', text: 'q' }]
     expect(applyEvent(before, { kind: 'usage', agentId: 'm', prompt: 1, completion: 1 } as AgentEvent)).toBe(before)
     expect(run([{ kind: 'error', message: 'no key' }]).at(-1)).toEqual({ kind: 'error', text: 'no key' })
+  })
+})
+
+describe('queued prompts', () => {
+  const q1: QueuedPrompt = { qid: 'q1', text: 'also check 2025', files: ['plan.csv'] }
+  const q2: QueuedPrompt = { qid: 'q2', text: 'and 2024' }
+  const items: Item[] = [{ kind: 'user', text: 'start' }, { kind: 'assistant', text: 'working', live: true }]
+
+  it('moves a prompt into the conversation when the model receives it', () => {
+    const s = applyChatEvent({ items, queue: [q1, q2] }, { kind: 'user_input', agentId: 'main', qid: 'q1' })
+    expect(s.queue).toEqual([q2])
+    expect(s.items).toEqual([{ kind: 'user', text: 'start' }, { kind: 'assistant', text: 'working' }, { kind: 'user', text: 'also check 2025', files: ['plan.csv'] }])
+    expect(s.restored).toEqual([])
+  })
+  it('ignores a prompt it never queued, such as one sent while idle', () => {
+    const queue = [q1]
+    const s = applyChatEvent({ items, queue }, { kind: 'user_input', agentId: 'main', qid: 'other' })
+    expect(s.items).toBe(items)
+    expect(s.queue).toBe(queue)
+  })
+  it('hands back the prompts cleared by a stop or failure', () => {
+    const s = applyChatEvent({ items, queue: [q1, q2] }, { kind: 'queue_cleared', agentId: 'main', qids: ['q1', 'q2'] })
+    expect(s.queue).toEqual([])
+    expect(s.items).toBe(items)
+    expect(s.restored).toEqual([q1, q2])
+    expect(restoreDraft(' half typed ', s.restored)).toBe('half typed\n\nalso check 2025\n\nand 2024')
+    expect(restoreDraft('', [{ qid: 'x', text: '' }])).toBe('')
+  })
+  it('passes every other event to applyEvent and keeps the queue as it is', () => {
+    const queue = [q1]
+    const s = applyChatEvent({ items, queue }, { kind: 'text', agentId: 'main', text: '!' })
+    expect(s.items.at(-1)).toEqual({ kind: 'assistant', text: 'working!', live: true })
+    expect(s.queue).toBe(queue)
+    expect(applyChatEvent({ items, queue }, { kind: 'usage', agentId: 'main', prompt: 1, completion: 1 }).items).toBe(items)
+  })
+  it('redraws the prompts a session still holds', () => {
+    const content = buildUserContent('look at this', [{ kind: 'text', name: 'notes.md', text: 'BODY' }])
+    expect(queuedView([{ qid: 'q1', content: content as any }, { qid: 'q2', content: 'plain' }])).toEqual([
+      { qid: 'q1', text: 'look at this', files: ['notes.md'] }, { qid: 'q2', text: 'plain' }
+    ])
   })
 })
 

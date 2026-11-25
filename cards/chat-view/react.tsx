@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ComponentType, type ReactNode, type Ref, type RefObject } from 'react'
 import { linkMarkdown, linkSegments, type LinkRule } from '../agent-loop/links'
-import { groupRows, groupState, isRunning, peek, stepFailed, technicalLabel, toolLabel, type Item, type ToolItem } from './items'
+import { groupRows, groupState, isRunning, peek, stepFailed, technicalLabel, toolLabel, type Item, type QueuedPrompt, type ToolItem } from './items'
 import { ATTACH_LIMITS, classify, clipText, fitSize, type Attachment } from './attach'
 
 /** Renders markdown text. The app passes its own so links and sanitizing follow its rules. */
@@ -306,6 +306,38 @@ export interface ComposerProps {
   /** True while a publish runs: the button spins and is disabled. */
   publishing?: boolean
   publishTitle?: string
+  /**
+   * Prompts waiting to join the conversation, drawn as chips above the box. Passing it (even empty) turns
+   * queueing on: Send stays available while `running`, next to Stop, and `onSend` is called for a follow-up.
+   * Without it the composer sends only when the agent is idle.
+   */
+  queue?: QueuedPrompt[]
+  /** Called by × on a chip. The app withdraws the prompt and puts its text back in the box. */
+  onUnqueue?(q: QueuedPrompt): void
+  /** Attachments to put back (those of a withdrawn or cleared prompt). A new `at` adds them once. */
+  restore?: { at: number; attachments: Attachment[] }
+}
+
+/** What a queue chip reads: the prompt, or the names of what was attached when it has no text. */
+export function queuedLabel(q: QueuedPrompt): string {
+  const n = q.images?.length ?? 0
+  return q.text.replace(/\s+/g, ' ').trim() || [...(q.files ?? []), ...(n ? [`${n} image${n === 1 ? '' : 's'}`] : [])].join(', ') || 'Attachment'
+}
+
+/** Queued prompts in the order the agent will read them: "Next", then "+1", "+2"… */
+export function QueueChips({ queue, onUnqueue }: { queue: QueuedPrompt[]; onUnqueue?(q: QueuedPrompt): void }) {
+  if (!queue.length) return null
+  return (
+    <div className="cv-queue" aria-label="Queued prompts">
+      {queue.map((q, i) => (
+        <div key={q.qid} className="cv-queued" title="Queued: joins the conversation at the agent's next step">
+          <span className="cv-queued-badge">{i === 0 ? 'Next' : `+${i}`}</span>
+          <span className="cv-queued-text">{queuedLabel(q)}</span>
+          {onUnqueue && <button aria-label="Remove from the queue" title="Remove from the queue and put it back in the box" onClick={() => onUnqueue(q)}>×</button>}
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function chipTitle(a: Attachment): string {
@@ -339,11 +371,15 @@ export function PublishIcon({ size = 18 }: { size?: number }) {
 }
 
 /** The standard chat input: text box, attach button, paste and drag-and-drop of images and files, Send/Stop. */
-export function Composer({ value, onChange, onSend, running, onStop, placeholder, inputRef, allowAttachments = true, prepareAttachment, extra, onPublish, publishing, publishTitle }: ComposerProps) {
+export function Composer({ value, onChange, onSend, running, onStop, placeholder, inputRef, allowAttachments = true, prepareAttachment, extra, onPublish, publishing, publishTitle, queue, onUnqueue, restore }: ComposerProps) {
   const [atts, setAtts] = useState<Attachment[]>([])
   const [notes, setNotes] = useState<string[]>([])
   const [drag, setDrag] = useState(false)
   const picker = useRef<HTMLInputElement>(null)
+  const queueing = queue !== undefined
+  useEffect(() => {
+    if (restore?.attachments.length) setAtts((a) => [...a, ...restore.attachments].slice(0, ATTACH_LIMITS.maxFiles))
+  }, [restore?.at])
 
   const add = async (files: File[]) => {
     if (!allowAttachments || !files.length) return
@@ -353,7 +389,7 @@ export function Composer({ value, onChange, onSend, running, onStop, placeholder
     setAtts((a) => [...a, ...attachments].slice(0, ATTACH_LIMITS.maxFiles))
     setNotes(skipped)
   }
-  const canSend = !running && (!!value.trim() || atts.length > 0)
+  const canSend = (queueing || !running) && (!!value.trim() || atts.length > 0)
   const send = () => {
     if (!canSend) return
     onSend(value.trim(), atts)
@@ -367,6 +403,7 @@ export function Composer({ value, onChange, onSend, running, onStop, placeholder
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDrag(false) }}
       onDrop={(e) => { if (!allowAttachments) return; e.preventDefault(); setDrag(false); void add([...e.dataTransfer.files]) }}
     >
+      {queue && <QueueChips queue={queue} onUnqueue={onUnqueue} />}
       {atts.length > 0 && (
         <div className="cv-chips">
           {atts.map((a, k) => (
@@ -394,7 +431,7 @@ export function Composer({ value, onChange, onSend, running, onStop, placeholder
         <textarea
           ref={inputRef}
           value={value}
-          placeholder={placeholder}
+          placeholder={running && queueing ? 'Add a follow-up. It joins at the agent\'s next step.' : placeholder}
           rows={3}
           onChange={(e) => onChange(e.target.value)}
           onPaste={(e) => {
@@ -404,8 +441,9 @@ export function Composer({ value, onChange, onSend, running, onStop, placeholder
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send() } }}
         />
         {extra}
+        {running && queueing && <button className="primary" disabled={!canSend} onClick={send} title="Queue: joins the conversation at the agent's next step">Queue</button>}
         {running
-          ? <button className="danger" onClick={onStop}>Stop</button>
+          ? <button className="danger" onClick={onStop} title={queueing ? 'Stop (queued prompts go back in the box)' : undefined}>Stop</button>
           : <button className="primary" disabled={!canSend} onClick={send}>Send</button>}
       </div>
       {drag && <div className="cv-dropzone">Drop images or files to attach</div>}

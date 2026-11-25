@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { Composer, MessageList, SubAgentBody, ToolBody, stepInput } from './react'
+import { Composer, MessageList, QueueChips, SubAgentBody, ToolBody, queuedLabel, stepInput } from './react'
 
 const t = { kind: 'tool', callId: 'c1', name: 'read_file', args: '{"path":"a.txt","intent":"Read the notes"}', ok: true, output: 'hello\n' } as any
 
@@ -44,6 +44,36 @@ describe('tool rows', () => {
     const html = renderToStaticMarkup(createElement(Composer, { ...base, onPublish() {} }))
     expect(html.indexOf('Attach files')).toBeLessThan(html.indexOf('cv-publish'))
     expect(renderToStaticMarkup(createElement(Composer, { ...base, onPublish() {}, publishing: true }))).toMatch(/cv-publish busy"[^>]*disabled/)
+  })
+})
+
+describe('prompt queue', () => {
+  const base = { value: 'next thing', onChange() {}, onSend() {} }
+  const queue = [{ qid: 'a', text: 'also  check\n2025' }, { qid: 'b', text: '', files: ['plan.pdf'], images: ['data:x', 'data:y'] }]
+  it('without a queue the composer only offers Stop while the agent works', () => {
+    const html = renderToStaticMarkup(createElement(Composer, { ...base, running: true }))
+    expect(html).toContain('>Stop<')
+    expect(html).not.toContain('>Queue<')
+    expect(html).not.toContain('cv-queue')
+  })
+  it('with a queue it offers Queue next to Stop and draws the waiting prompts in order', () => {
+    const html = renderToStaticMarkup(createElement(Composer, { ...base, running: true, queue, onUnqueue() {} }))
+    expect(html.indexOf('>Queue<')).toBeLessThan(html.indexOf('>Stop<'))
+    expect(html).not.toMatch(/<button class="primary" disabled/)
+    expect(html.indexOf('>Next<')).toBeLessThan(html.indexOf('>+1<'))
+    expect(html).toContain('also check 2025')
+    expect(html).toContain('plan.pdf, 2 images')
+    expect(html).toContain('Remove from the queue')
+    expect(html).toContain('It joins at the agent&#x27;s next step.')
+  })
+  it('an idle composer with queueing on still reads Send, and empty text cannot be queued', () => {
+    expect(renderToStaticMarkup(createElement(Composer, { ...base, queue: [] }))).toContain('>Send<')
+    expect(renderToStaticMarkup(createElement(Composer, { ...base, value: ' ', running: true, queue: [] }))).toMatch(/<button class="primary" disabled[^>]*>Queue</)
+  })
+  it('chips draw nothing when the queue is empty and have no × without onUnqueue', () => {
+    expect(renderToStaticMarkup(createElement(QueueChips, { queue: [] }))).toBe('')
+    expect(renderToStaticMarkup(createElement(QueueChips, { queue }))).not.toContain('<button')
+    expect(queuedLabel({ qid: 'x', text: '' })).toBe('Attachment')
   })
 })
 

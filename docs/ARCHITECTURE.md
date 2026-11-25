@@ -283,8 +283,9 @@ useEffect(() => window.api.onEvent((chatId, e) => setItems((s) => ({ ...s, [chat
   <div className="messages" ref={scroller}><MessageList items={items} Markdown={Markdown} links={LINKS} /></div>
   <TurnRail scrollRef={scroller} deps={items} />
 </div>
-<Composer value={text} onChange={setText} onSend={(text, atts) => api.send(id, text, atts)} running={busy}
-  onStop={() => api.stop(id)} onPublish={() => api.publish(id)} publishing={publishing} />
+<Composer value={text} onChange={setText} onSend={(text, atts) => api.send(id, text, atts, qid())} running={busy}
+  onStop={() => api.stop(id)} onPublish={() => api.publish(id)} publishing={publishing}
+  queue={queue} onUnqueue={unqueue} />   // keep typing while the agent works: see PROMPT-QUEUE.md
 
 // App.tsx: the screens
 const host: ScreenHost = { data, loadPanel: api.loadPanel, runJob: api.runJob, stopJob: api.stopJob, running, reports,

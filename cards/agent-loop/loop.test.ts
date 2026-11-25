@@ -167,6 +167,23 @@ describe('session', () => {
     expect(session.isBusy).toBe(false)
   })
 
+  it('lists the prompts still waiting, for a view that redraws them', async () => {
+    let release!: () => void
+    const held = new Promise<void>((r) => (release = r))
+    const slow: ToolDef = { name: 'slow', description: '', parameters: { type: 'object', properties: {} }, run: async () => { await held; return 'ok' } }
+    const { session } = setup([call(['slow', {}]), say('finished')], { tools: [slow] })
+    expect(session.queued).toEqual([])
+    const first = session.send('start')
+    await new Promise((r) => setTimeout(r, 20))
+    await session.send('one', [], 'q1')
+    await session.send('no id')
+    await session.send('two', [], 'q2')
+    expect(session.queued).toEqual([{ qid: 'q1', content: 'one' }, { qid: 'q2', content: 'two' }])
+    release()
+    await first
+    expect(session.queued).toEqual([])
+  })
+
   it('can remove a queued prompt before it is sent', async () => {
     let release!: () => void
     const held = new Promise<void>((r) => (release = r))

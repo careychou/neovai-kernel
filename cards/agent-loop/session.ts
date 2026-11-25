@@ -51,6 +51,10 @@ export class Session {
   /** The model-call limiter. Sub-agents share it so the whole agent tree stays within `maxConcurrency`. */
   get semaphore() { return this.sem }
   get history(): Message[] { return this.messages.slice(1) }
+  /** Prompts sent with a `qid` that are still waiting to join the conversation, in order. For a view that redraws them after a reload. */
+  get queued(): Array<{ qid: string; content: Message['content'] }> {
+    return this.queue.flatMap((q) => (q.qid ? [{ qid: q.qid, content: q.content }] : []))
+  }
   setModel(model: string) { this.o.model = model }
   setReasoning(r: Reasoning) { this.o.reasoning = r }
 

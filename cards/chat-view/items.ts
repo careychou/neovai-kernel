@@ -1,5 +1,5 @@
 import type { AgentEvent, AgentStatus, Message } from '../agent-loop/types'
-import { userView } from './attach'
+import { userView, type Attachment } from './attach'
 
 /** One thing the chat draws. */
 export type Item =
@@ -112,6 +112,53 @@ export function applyEvent(items: Item[], e: AgentEvent): Item[] {
     default:
       return items
   }
+}
+
+/** A prompt sent while the agent was working, waiting to join the conversation at its next step. */
+export interface QueuedPrompt {
+  qid: string
+  text: string
+  images?: string[]
+  files?: string[]
+  /** The files as attached, kept by the window that queued the prompt so they can go back to the composer. */
+  attachments?: Attachment[]
+}
+
+/** What a chat draws: the conversation and the prompts still waiting to join it. */
+export interface ChatState { items: Item[]; queue: QueuedPrompt[] }
+
+/** Turns `Session.queued` into the prompts a chat draws as chips, e.g. when a working chat is reopened. */
+export function queuedView(queued: Array<{ qid: string; content: Message['content'] }>): QueuedPrompt[] {
+  return queued.map((q) => {
+    const v = userView(q.content)
+    return { qid: q.qid, text: v.text, ...(v.images.length ? { images: v.images } : {}), ...(v.files.length ? { files: v.files } : {}) }
+  })
+}
+
+const userItem = (q: QueuedPrompt): Item => ({ kind: 'user', text: q.text, ...(q.images?.length ? { images: q.images } : {}), ...(q.files?.length ? { files: q.files } : {}) })
+
+/**
+ * `applyEvent` for a chat that queues prompts. `user_input` moves a queued prompt into the conversation at the
+ * point the model received it; `queue_cleared` (stop or failure) takes prompts out of the queue and returns
+ * them in `restored`, for the app to put back in the message box. `items` and `queue` keep their identity
+ * when they do not change.
+ */
+export function applyChatEvent(s: ChatState, e: AgentEvent): ChatState & { restored: QueuedPrompt[] } {
+  if (e.kind === 'user_input') {
+    const hit = s.queue.find((q) => q.qid === e.qid)
+    if (!hit) return { items: s.items, queue: s.queue, restored: [] }
+    return { items: [...settle(s.items), userItem(hit)], queue: s.queue.filter((q) => q !== hit), restored: [] }
+  }
+  if (e.kind === 'queue_cleared') {
+    const restored = s.queue.filter((q) => e.qids.includes(q.qid))
+    return { items: s.items, queue: restored.length ? s.queue.filter((q) => !restored.includes(q)) : s.queue, restored }
+  }
+  return { items: applyEvent(s.items, e), queue: s.queue, restored: [] }
+}
+
+/** The message box text after queued prompts come back to it: what was typed, then each prompt, blank lines between. */
+export function restoreDraft(draft: string, restored: QueuedPrompt[]): string {
+  return [draft, ...restored.map((q) => q.text)].map((t) => t.trim()).filter(Boolean).join('\n\n')
 }
 
 /** Folds consecutive tool calls into one group row. A lone call stays a plain row. */
