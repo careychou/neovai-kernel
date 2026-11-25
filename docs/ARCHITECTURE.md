@@ -8,6 +8,8 @@ Both apps I've built on the kernel do exactly that. **Neovai Investor** (`careyc
 
 This guide walks through how the pieces fit, then the exact code an app writes.
 
+For session turn storage, compaction and just-in-time recall, see [Context memory](CONTEXT-MEMORY.md), including backend message examples with and without automatic hints.
+
 ## 1. The big picture
 
 An app is three layers. The kernel supplies the bottom layer, plus the chat and screen components on top. The app writes a thin host in the middle. All of the app's behavior lives as files in a **workspace**, which the agents read and change while the app runs.
