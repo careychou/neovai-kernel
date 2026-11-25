@@ -89,6 +89,22 @@ describe('runtime agent', () => {
     expect(rt.lastRun('daily')).toMatchObject({ text: 'Refreshed', input: '{"mode":"reuse-scan","count":10}' })
   })
 
+  it('sends attached files with the run and keeps only their names in the report', async () => {
+    start([say('Read it')])
+    const r = await rt.run('daily', { instruction: 'use the deck' }, [
+      { kind: 'pdf', name: 'deck.pdf', data: 'JVBERi0=', text: 'SECRET-PDF-TEXT', pages: 1, path: 'records/attachments/ab-deck.pdf' },
+      { kind: 'image', name: 'chart.png', dataUrl: 'data:image/png;base64,iVBO', width: 2, height: 2 }
+    ])
+    const first: any = requests[0].find((m: any) => m.role === 'user')
+    expect(Array.isArray(first.content)).toBe(true)
+    expect(first.content.some((p: any) => p.type === 'file' && p.file.name === 'deck.pdf')).toBe(true)
+    expect(first.content.some((p: any) => p.type === 'image_url')).toBe(true)
+    expect(JSON.stringify(first.content)).toContain('use the deck')
+    expect(r.attachments).toEqual(['deck.pdf (records/attachments/ab-deck.pdf)', 'chart.png'])
+    expect(fs.readFileSync(r.file, 'utf8')).not.toContain('SECRET-PDF-TEXT')
+    expect(rt.lastRun('daily')?.attachments).toEqual(r.attachments)
+  })
+
   it('picks up an edited skill on the next run without a restart', async () => {
     start([say('one'), say('two')])
     await rt.run('daily')

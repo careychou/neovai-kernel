@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { SubAgents } from '../sub-agents'
-import { PLAIN_LANGUAGE_RULES, Session, type AgentEvent, type Hooks, type ModelAdapter, type Reasoning, type ToolDef } from '../agent-loop'
+import { PLAIN_LANGUAGE_RULES, Session, type AgentEvent, type Attachment, type Hooks, type ModelAdapter, type Reasoning, type ToolDef } from '../agent-loop'
 import { makeFileTools } from '../file-tools'
 import { loadSkillSources, loadSkills, makeSkillTool, parseFrontMatter, skillsInstructions, skillsPrompt, type SkillSource } from '../skills'
 import { PermissionGate } from '../approval'
@@ -28,6 +28,8 @@ export interface RunRecord {
   file: string
   /** The options the run was started with, as text. */
   input?: string
+  /** Names of the files attached to the run. */
+  attachments?: string[]
 }
 
 const NAME = /^[a-z0-9][a-z0-9-]*$/
@@ -181,11 +183,15 @@ export function createRuntime(o: RuntimeOptions) {
     const f = files.at(-1)
     if (!f) return null
     const { meta, body } = parseFrontMatter(fs.readFileSync(path.join(dir, f), 'utf8'))
-    return { runId: meta.run ?? '', job, status: (meta.status as RunRecord['status']) ?? 'completed', started: meta.started ?? '', finished: meta.finished ?? '', text: body, file: path.join(dir, f), ...(meta.input ? { input: meta.input } : {}) }
+    return { runId: meta.run ?? '', job, status: (meta.status as RunRecord['status']) ?? 'completed', started: meta.started ?? '', finished: meta.finished ?? '', text: body, file: path.join(dir, f), ...(meta.input ? { input: meta.input } : {}), ...(meta.attachments ? { attachments: meta.attachments.split('; ') } : {}) }
   }
 
-  /** Runs one job to the end and saves its report under `<records>/runs/<job>/`. */
-  async function run(name: string, input: RunInput = ''): Promise<RunRecord> {
+  /**
+   * Runs one job to the end and saves its report under `<records>/runs/<job>/`.
+   * `attachments` go with the first message the way a chat sends them (images, PDFs, scanned pages, text);
+   * the report keeps only their names and paths, never their contents.
+   */
+  async function run(name: string, input: RunInput = '', attachments: Attachment[] = []): Promise<RunRecord> {
     const job = readJob(jobsDir, name)
     if (!job) throw new Error(`No job named "${name}". Available: ${loadJobs(jobsDir).map((j) => j.name).join(', ') || 'none'}.`)
     if ([...runs.values()].some((r) => r.job === name)) throw new Error(`"${name}" is already running`)
@@ -217,14 +223,15 @@ export function createRuntime(o: RuntimeOptions) {
     if (subs) subs.attach(session)
     runs.set(runId, { job: name, session })
     try {
-      const r = await session.send(runMessage(job, input))
+      const r = await session.send(runMessage(job, input), attachments)
       const status = r.status === 'queued' ? 'failed' : r.status
       const finished = new Date()
       fs.mkdirSync(path.join(runsDir, name), { recursive: true })
       const file = path.join(runsDir, name, `${stamp(started)}.md`)
       const opts = inputText(input)
-      fs.writeFileSync(file, `---\nrun: ${runId}\nstatus: ${status}\nstarted: ${started.toISOString()}\nfinished: ${finished.toISOString()}\n${opts ? `input: ${opts.replace(/\s*\n\s*/g, ' ')}\n` : ''}---\n${r.text}\n`)
-      return { runId, job: name, status, started: started.toISOString(), finished: finished.toISOString(), text: r.text, file, ...(opts ? { input: opts } : {}) }
+      const files = attachments.map((a) => (a.path ? `${a.name} (${a.path})` : a.name))
+      fs.writeFileSync(file, `---\nrun: ${runId}\nstatus: ${status}\nstarted: ${started.toISOString()}\nfinished: ${finished.toISOString()}\n${opts ? `input: ${opts.replace(/\s*\n\s*/g, ' ')}\n` : ''}${files.length ? `attachments: ${files.join('; ').replace(/\s*\n\s*/g, ' ')}\n` : ''}---\n${r.text}\n`)
+      return { runId, job: name, status, started: started.toISOString(), finished: finished.toISOString(), text: r.text, file, ...(opts ? { input: opts } : {}), ...(files.length ? { attachments: files } : {}) }
     } finally {
       runs.delete(runId)
     }

@@ -2,7 +2,7 @@
 
 **The kernel sends images and text files with no setup. For PDFs, Office files and file paths, the app gives the composer one function, `prepareAttachment`.**
 
-This guide describes kernel 0.18.0. The kernel has no PDF library and cannot see the disk from a window, so the app supplies the file reading. The kernel decides what each model receives.
+This guide describes kernel 0.19.0. The kernel has no PDF library and cannot see the disk from a window, so the app supplies the file reading. The kernel decides what each model receives.
 
 A runnable version of everything below is in [`tests/regression/attachments.test.ts`](../tests/regression/attachments.test.ts).
 
@@ -119,6 +119,16 @@ store.saveMessages(chatId, session.history)
 ```
 
 Nothing else changes. The saved history keeps the PDF, and `userView(message.content)` shows it as one file name in the conversation.
+
+### Jobs (runtime agent)
+
+Since 0.19.0 a job run takes the same attachments as a chat:
+
+```ts
+await runtime.run('methodology', { instruction }, attachments)
+```
+
+They go with the run's first message, so each model receives them as described in section 3. The run report keeps only the names and paths (`RunRecord.attachments`), never the contents. Pass attachments separately from `input`: anything inside `input` is written into the report as text.
 
 ## 5. Other file types
 
