@@ -247,7 +247,7 @@ function sessionFor(chatId: string): Session {
 // systemPrompt() = BASE_PROMPT + PLAIN_LANGUAGE_RULES + instructions + skillsPrompt(loadSkillSources(...)) + jobs + preferences
 ```
 
-Attachments are `image`, `text`, `pdf` (the file plus its extracted text) or `pages` (a scanned PDF as page images), each with an optional `path` on disk that is passed to the model. The providers decide what goes on the wire: Claude gets a PDF as a document, every other model gets its text. Reading PDFs, rendering pages and saving files to disk need the host, so the app does them in a `prepareAttachment` function given to `Composer`, and builds the attachment with `pdfAttachment` from `chat-view`.
+Attachments are `image`, `text`, `pdf` (the file plus its extracted text) or `pages` (a scanned PDF as page images), each with an optional `path` on disk that is passed to the model. The providers decide what goes on the wire: Claude gets a PDF as a document, every other model gets its text. Reading PDFs, rendering pages and saving files to disk need the host, so the app does them in a `prepareAttachment` function given to `Composer`, and builds the attachment with `pdfAttachment` from `chat-view`. The [attachments guide](ATTACHMENTS.md) has the full example.
 
 After each `session.send(prompt, attachments)`, save `session.history` with `store.saveMessages(chatId, ...)`. Save again on the main agent's `agent_end` event. A background helper can wake the chat after `send` has already returned, and that turn needs saving too.
 
