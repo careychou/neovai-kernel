@@ -81,7 +81,7 @@ Four ideas hold this together.
 | `runtime-agent` | Node | agent-loop, file-tools, skills, approval, sub-agents | Runs `jobs/<name>.md` headless with instructions and skills inlined, writes only under `records/`, `save_data` for screens |
 | `live-ui` | Node + React | agent-loop | JSON screens and runtime-compiled `.tsx` panels, `check_ui` tool, `ScreenView`, `@neovai/panel` |
 | `chat-view` | React (+ Node view model) | agent-loop | Event-to-item view model (`applyEvent`, `fromMessages`) and the chat components |
-| `git-publish` | Node | agent-loop | Copies the workspace into a repository (a temporary clone of a remote one), commits, pushes, streams each step as chat events |
+| `git-publish` | Node | agent-loop | Copies the workspace into a repository (a temporary clone of a remote one), commits with a message that can say why (`commitMessageWriter`), pushes, streams each step as chat events |
 | `context-memory` | Node | agent-loop, session-store | `ContextMemory`: indexes every turn in the store's SQLite file, the `recall` tool, prompt hints attached after the prompt, compaction of older turns into a summary (manual or automatic) |
 
 You only take what you need. A chat-only assistant needs `agent-loop`, `model-providers`, `settings`, `session-store`, `chat-view` and a few tools. An app with screens and jobs adds `runtime-agent` and `live-ui`.

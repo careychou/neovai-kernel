@@ -5,7 +5,8 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import type { AgentEvent } from '../agent-loop'
 import { applyEvent, fromMessages, type Item } from '../chat-view'
-import { describeChanges, excluded, mirrorFolder, publish } from './index'
+import type { ChatRequest, Delta, ModelAdapter } from '../agent-loop'
+import { cleanMessage, commitMessageWriter, describeChanges, excluded, mirrorFolder, publish, type ChangeInfo } from './index'
 
 let dir: string, repo: string, remote: string, app: string
 const git = (...a: string[]) => execFileSync('git', a, { cwd: repo, encoding: 'utf8' }).trim()
@@ -101,6 +102,45 @@ describe('git-publish', () => {
     const r = await publish({ repo: app })
     expect(r.status).toBe('failed')
     expect(r.messages[0]).toMatchObject({ role: 'assistant' })
+  })
+
+  it('commits with the message a describe hook writes from the staged diff and the time of the last commit', async () => {
+    let got: ChangeInfo | undefined
+    const events: AgentEvent[] = []
+    const r = await publish({
+      repo, mirror: { from: app, to: path.join(repo, 'workspace'), exclude: ['records/**'] }, onEvent: (e) => events.push(e),
+      describe: async (info) => { got = info; return '```\nTighten stops on trade bucket\n\nWhy: the user asked for 2% stops.\n```' }
+    })
+    expect(r.status).toBe('published')
+    expect(got?.base).toBe('workspace')
+    expect(got?.patch).toContain('a2')
+    expect(got?.stat).toContain('ui/a.tsx')
+    expect(got?.since).toBeGreaterThan(0)
+    const log = (f: string) => execFileSync('git', ['--git-dir', remote, 'log', '-1', `--format=${f}`, 'main'], { encoding: 'utf8' }).trim()
+    expect(log('%s')).toBe('Tighten stops on trade bucket')
+    expect(log('%b')).toBe('Why: the user asked for 2% stops.')
+    let items: Item[] = []
+    for (const e of events) items = applyEvent(items, e)
+    expect(items.filter((i) => i.kind === 'tool').map((s) => JSON.parse((s as { args: string }).args).intent)).toContain('Write the commit message')
+  })
+
+  it('falls back to the short message when the describe hook fails', async () => {
+    const r = await publish({ repo, mirror: { from: app, to: path.join(repo, 'workspace') }, describe: async () => { throw new Error('no model') } })
+    expect(r.status).toBe('published')
+    expect(execFileSync('git', ['--git-dir', remote, 'log', '-1', '--format=%s', 'main'], { encoding: 'utf8' }).trim()).toMatch(/^Codify: update /)
+  })
+
+  it('asks the model with the requests and the diff', async () => {
+    let req: ChatRequest | undefined
+    const adapter: ModelAdapter = { async *stream(r): AsyncIterable<Delta> { req = r; yield { type: 'text', text: '"Add income bucket\n\nWhy: asked for T-bills."' } } }
+    const write = commitMessageWriter({ adapter, model: 'm', maxPatch: 5, context: () => 'User: add a T-bill sleeve' })
+    const msg = await write({ files: [' M a'], stat: ' a | 1 +', patch: '+abcdefghij', base: '', since: 0 })
+    expect(msg).toBe('Add income bucket\n\nWhy: asked for T-bills.')
+    const user = String(req?.messages[1].content)
+    expect(user).toContain('User: add a T-bill sleeve')
+    expect(user).toContain('(diff cut)')
+    expect(user).not.toContain('fghij')
+    expect(cleanMessage('```text\nA  \nB\n```')).toBe('A\nB')
   })
 
   it('matches exclude globs and names changed areas', () => {

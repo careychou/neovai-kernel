@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
-import type { AgentEvent, Message, ToolCall } from '../agent-loop'
+import type { AgentEvent, Message, ModelAdapter, ToolCall } from '../agent-loop'
 
 export interface RunResult { code: number; out: string }
 /** Runs a command without a shell. Replaceable in tests. */
@@ -29,6 +29,9 @@ export interface PublishOptions {
   mirror?: Mirror
   /** Commit message; a short one naming the changed folders is made when omitted. */
   message?: string
+  /** Writes the commit message from the staged changes (e.g. `commitMessageWriter`). Used when `message` is not set;
+   * an empty answer or an error falls back to the short one. */
+  describe?: Describe
   remote?: string
   /** Set false to commit without pushing. */
   push?: boolean
@@ -37,6 +40,21 @@ export interface PublishOptions {
   agentId?: string
   run?: Runner
 }
+
+/** What a `describe` hook gets: the staged changes and when the repository was last committed to. */
+export interface ChangeInfo {
+  /** `git status --porcelain` lines. */
+  files: string[]
+  /** `git diff --cached --stat`. */
+  stat: string
+  /** `git diff --cached`, cut to `maxPatch` characters. */
+  patch: string
+  /** The mirrored folder inside the repository ('' without a mirror). */
+  base: string
+  /** Time of the repository's last commit before this one (ms since epoch), e.g. to collect the requests made since. */
+  since: number
+}
+export type Describe = (info: ChangeInfo) => Promise<string | null | undefined>
 
 export interface PublishResult {
   status: 'published' | 'committed' | 'nothing' | 'failed'
@@ -120,6 +138,52 @@ export function describeChanges(lines: string[], base = ''): string {
   return `update ${names} (${lines.length} file${lines.length === 1 ? '' : 's'})`
 }
 
+/** Strips code fences and quotes a model may wrap a message in, and trims each line's trailing space. */
+export function cleanMessage(t: string): string {
+  return t.replace(/^\s*```[a-z]*\n?/i, '').replace(/\n?```\s*$/, '').split('\n').map((l) => l.trimEnd()).join('\n').trim().replace(/^"([\s\S]*)"$/, '$1').trim()
+}
+
+export interface CommitWriterOptions {
+  adapter: ModelAdapter
+  model: string
+  /** What led to the changes, e.g. the user's requests and the agent's answers since `info.since`. */
+  context?: (info: ChangeInfo) => string | Promise<string>
+  /** Most diff characters sent to the model (default 24000). */
+  maxPatch?: number
+  signal?: AbortSignal
+}
+
+const WRITER_PROMPT = `You write git commit messages for an app whose screens, agent instructions, skills and logic were changed by a coding agent at a user's request. Write one message for the staged changes below.
+
+Format:
+- First line: what changed, in plain words, at most 72 characters, no trailing period, no prefix.
+- A blank line.
+- "Why:" then one to three sentences on the reason: what the user asked for or what problem it fixes. Take the reason from the requests; if they don't say, say what the change does for the user and don't invent one.
+- A blank line.
+- "What changed:" then short bullets ("- ") grouped by kind where it applies: screens and panels, agent instructions and skills, jobs, logic and data shape, docs. Name the files or rules that matter and the behavior that is different now.
+
+Use only facts from the requests and the diff. No hype, no emoji. Reply with the message only.`
+
+/** A `describe` hook that asks a model for a commit message with the reason for the change and what changed. */
+export function commitMessageWriter(w: CommitWriterOptions): Describe {
+  return async (info) => {
+    const max = w.maxPatch ?? 24_000
+    const context = (await w.context?.(info))?.trim()
+    const patch = info.patch.length > max ? info.patch.slice(0, max) + '\n… (diff cut)' : info.patch
+    const user = [
+      context ? `# What led to these changes\n${context}` : '# What led to these changes\n(no requests recorded)',
+      `# Files\n${info.stat}`,
+      `# Diff\n${patch}`
+    ].join('\n\n')
+    let text = ''
+    const signal = w.signal ?? AbortSignal.timeout(90_000)
+    for await (const d of w.adapter.stream({ model: w.model, maxTokens: 1200, messages: [{ role: 'system', content: WRITER_PROMPT }, { role: 'user', content: user }] }, signal)) {
+      if (d.type === 'text') text += d.text
+    }
+    return cleanMessage(text)
+  }
+}
+
 /** Copies, commits and pushes, one visible step at a time. Never throws: a failed step ends the run with its output. */
 export async function publish(o: PublishOptions): Promise<PublishResult> {
   const agentId = o.agentId ?? 'main'
@@ -199,16 +263,29 @@ async function publishIn(repo: string, o: PublishOptions, step: Step, finish: Fi
   let commit = ''
   if (changes.length) {
     const base = m ? path.relative(top.output.trim(), path.resolve(m.to)).split(path.sep).join('/') : ''
-    const message = o.message?.trim() || `Codify: ${describeChanges(changes, base)}`
-    const c = await step('Save the changes as a commit', `git add -A && git commit -m "${message}"`, async () => {
-      const a = await git('add', '-A')
-      if (a.code !== 0) return { ok: false, output: a.out }
+    const a = await git('add', '-A')
+    if (a.code !== 0) return finish('failed', "I couldn't stage the changes: " + a.out)
+    let message = o.message?.trim() ?? ''
+    if (!message && o.describe) {
+      await step('Write the commit message', 'git diff --cached', async () => {
+        const since = Number((await git('log', '-1', '--format=%ct')).out.trim()) * 1000 || 0
+        const stat = (await git('diff', '--cached', '--stat')).out
+        const patch = (await git('diff', '--cached')).out
+        try { message = cleanMessage((await o.describe!({ files: changes, stat, patch, base, since })) ?? '') } catch (e) {
+          return { ok: true, output: `Couldn't write a message (${String((e as Error)?.message ?? e)}); using a short one.` }
+        }
+        return { ok: true, output: message || 'No message came back; using a short one.' }
+      })
+    }
+    if (!message) message = `Codify: ${describeChanges(changes, base)}`
+    const subject = message.split('\n')[0]
+    const c = await step('Save the changes as a commit', `git add -A && git commit -m "${subject}"`, async () => {
       // A fresh download has no author unless git is set up globally; fall back to a named one.
       const who = (await git('config', 'user.email')).out.trim() ? [] : ['-c', 'user.name=Codify', '-c', 'user.email=codify@localhost']
       const r = await git(...who, 'commit', '-q', '-m', message)
       if (r.code !== 0) return { ok: false, output: r.out }
       commit = (await git('rev-parse', '--short', 'HEAD')).out.trim()
-      return { ok: true, output: `${commit} ${message}` }
+      return { ok: true, output: `${commit} ${subject}` }
     })
     if (!c.ok) return finish('failed', "I couldn't save the changes as a commit.")
   }
