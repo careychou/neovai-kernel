@@ -44,11 +44,11 @@ const range = (a: number, b: number) => Array.from({ length: Math.max(0, b - a) 
 const END_TAG = '</compacted_history>'
 export const COMPACT_ACK = 'Understood. I have the summary of the earlier conversation and will build on it.'
 
-/** Rough token count: JSON chars / 4, with each image counted as a flat IMAGE_TOKENS (not its base64 size). */
+/** Rough token count: JSON chars / 4, with each image (and each page of a PDF file part) counted as a flat IMAGE_TOKENS (not its base64 size). */
 export const estimateTokens = (messages: Message[]) =>
   Math.round(messages.reduce((n, m) => {
     if (m.role !== 'user' || typeof m.content === 'string') return n + JSON.stringify(m).length / 4
-    return n + m.content.reduce((k, p) => k + (p.type === 'text' ? p.text.length / 4 : IMAGE_TOKENS), 8)
+    return n + m.content.reduce((k, p) => k + (p.type === 'text' ? p.text.length / 4 : p.type === 'file' ? p.file.text.length / 4 + p.file.pages * IMAGE_TOKENS : IMAGE_TOKENS), 8)
   }, 0))
 
 /** Existing summary carried by a previous compaction (the leading <compacted_history> message), if any. */

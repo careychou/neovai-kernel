@@ -121,6 +121,26 @@ describe('Vertex adapter', () => {
     g.close()
   })
 
+  it('sends a PDF as a document to Claude and as its text to other models', async () => {
+    const g = await fakeGoogle()
+    const a = new VertexAdapter({ project: 'proj', credentialsPath: keyFile(g.host), models: ['anthropic/claude-sonnet-5', 'google/gemini-2.5-pro'], endpoint: g.host })
+    const messages = [{ role: 'user' as const, content: [
+      { type: 'text' as const, text: 'summarize' },
+      { type: 'file' as const, file: { name: 'r.pdf', media_type: 'application/pdf' as const, data: 'QkFTRTY0UERG', text: '--- page 1 ---\nQuarterly notes', pages: 1 } }
+    ] }]
+    await collect(a.stream({ model: 'anthropic/claude-sonnet-5', messages }, sig()))
+    const claude = g.hits.at(-1)!
+    expect(claude.url).toContain(':streamRawPredict')
+    expect(claude.body.messages[0].content).toContainEqual(expect.objectContaining({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'QkFTRTY0UERG' } }))
+    await collect(a.stream({ model: 'google/gemini-2.5-pro', messages }, sig()))
+    const gemini = g.hits.at(-1)!
+    expect(gemini.url).toContain('/chat/completions')
+    expect(gemini.raw).toContain('Quarterly notes')
+    expect(gemini.raw).not.toContain('QkFTRTY0UERG')
+    expect(JSON.stringify(gemini.body.messages)).not.toContain('"file"')
+    g.close()
+  })
+
   it('refreshes the token once on 401', async () => {
     const g = await fakeGoogle({ failFirst: 1 })
     const a = new VertexAdapter({ project: 'proj', credentialsPath: keyFile(g.host), models: ['google/gemini-2.5-pro'], endpoint: g.host })

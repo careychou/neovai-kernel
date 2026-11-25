@@ -250,17 +250,32 @@ async function readImage(f: File): Promise<Attachment> {
 }
 
 /**
+ * A host's own reader for one file, tried before the built-in one. Return the attachment(s) to use, or nothing
+ * to leave the file to the built-in reader. This is where an app reads PDFs (see `pdfAttachment`) and other
+ * formats, and sets `path` when it knows where the file is on disk.
+ */
+export type PrepareAttachment = (file: File) => Promise<Attachment | Attachment[] | null | undefined | void>
+
+/**
  * Turns picked, pasted or dropped files into attachments: images are downscaled in the window,
  * text files are read and cut to size. Files it cannot use come back in `skipped` with the reason.
  */
-export async function readFiles(files: File[]): Promise<{ attachments: Attachment[]; skipped: string[] }> {
+export async function readFiles(files: File[], prepare?: PrepareAttachment): Promise<{ attachments: Attachment[]; skipped: string[] }> {
   const attachments: Attachment[] = []
   const skipped: string[] = []
   for (const f of files) {
     const name = f.name || (f.type.startsWith('image/') ? `pasted-image.${f.type.split('/')[1] || 'png'}` : 'pasted.txt')
-    const kind = classify(name, f.type)
-    if (!kind) { skipped.push(`${name}: this file type can't be attached (images and text files only)`); continue }
     if (f.size > ATTACH_LIMITS.maxFileBytes) { skipped.push(`${name}: larger than ${Math.round(ATTACH_LIMITS.maxFileBytes / 1e6)} MB`); continue }
+    if (prepare) {
+      try {
+        const own = await prepare(f)
+        if (own) { attachments.push(...(Array.isArray(own) ? own : [own])); continue }
+      } catch (e) {
+        skipped.push(`${name}: could not be read (${(e as Error)?.message ?? e})`); continue
+      }
+    }
+    const kind = classify(name, f.type)
+    if (!kind || kind === 'pdf') { skipped.push(`${name}: this file type can't be attached (images and text files only)`); continue }
     try {
       if (kind === 'image') attachments.push(await readImage(new File([f], name, { type: f.type })))
       else { const t = clipText(await readAs(f, 'text')); attachments.push({ kind: 'text', name, text: t.text, ...(t.note ? { note: t.note } : {}) }) }
@@ -282,6 +297,8 @@ export interface ComposerProps {
   inputRef?: Ref<HTMLTextAreaElement>
   /** Set false for a chat whose agent cannot take files. */
   allowAttachments?: boolean
+  /** The app's own file reader (PDFs, Office files, paths on disk), tried before the built-in one. */
+  prepareAttachment?: PrepareAttachment
   /** Extra controls drawn left of Send. */
   extra?: ReactNode
   /** Shows a publish button next to attach (pair with the git-publish card); its steps should stream into the chat. */
@@ -289,6 +306,13 @@ export interface ComposerProps {
   /** True while a publish runs: the button spins and is disabled. */
   publishing?: boolean
   publishTitle?: string
+}
+
+function chipTitle(a: Attachment): string {
+  if (a.kind === 'image') return `${a.name} (${a.width}×${a.height})`
+  if (a.kind === 'pages') return `${a.name}: scanned PDF, ${a.pages.length < a.total ? `first ${a.pages.length} of ${a.total} pages` : `${a.total} page${a.total === 1 ? '' : 's'}`} as images`
+  const note = [a.kind === 'pdf' ? `${a.pages} page${a.pages === 1 ? '' : 's'}` : '', a.note].filter(Boolean).join('; ')
+  return note ? `${a.name}: ${note}` : a.name
 }
 
 /** Paperclip icon for the attach button; draws in the current text colour. */
@@ -315,7 +339,7 @@ export function PublishIcon({ size = 18 }: { size?: number }) {
 }
 
 /** The standard chat input: text box, attach button, paste and drag-and-drop of images and files, Send/Stop. */
-export function Composer({ value, onChange, onSend, running, onStop, placeholder, inputRef, allowAttachments = true, extra, onPublish, publishing, publishTitle }: ComposerProps) {
+export function Composer({ value, onChange, onSend, running, onStop, placeholder, inputRef, allowAttachments = true, prepareAttachment, extra, onPublish, publishing, publishTitle }: ComposerProps) {
   const [atts, setAtts] = useState<Attachment[]>([])
   const [notes, setNotes] = useState<string[]>([])
   const [drag, setDrag] = useState(false)
@@ -324,7 +348,7 @@ export function Composer({ value, onChange, onSend, running, onStop, placeholder
   const add = async (files: File[]) => {
     if (!allowAttachments || !files.length) return
     const room = ATTACH_LIMITS.maxFiles - atts.length
-    const { attachments, skipped } = await readFiles(files.slice(0, Math.max(0, room)))
+    const { attachments, skipped } = await readFiles(files.slice(0, Math.max(0, room)), prepareAttachment)
     if (files.length > room) skipped.push(`Only ${ATTACH_LIMITS.maxFiles} files can be attached to one message.`)
     setAtts((a) => [...a, ...attachments].slice(0, ATTACH_LIMITS.maxFiles))
     setNotes(skipped)
@@ -346,8 +370,8 @@ export function Composer({ value, onChange, onSend, running, onStop, placeholder
       {atts.length > 0 && (
         <div className="cv-chips">
           {atts.map((a, k) => (
-            <span key={k} className="cv-chip" title={a.kind === 'image' ? `${a.name} (${a.width}×${a.height})` : a.note ? `${a.name}: ${a.note}` : a.name}>
-              {a.kind === 'image' ? <img src={a.dataUrl} alt="" /> : <span className="cv-chip-icon">📄</span>}
+            <span key={k} className="cv-chip" title={chipTitle(a)}>
+              {a.kind === 'image' ? <img src={a.dataUrl} alt="" /> : a.kind === 'pages' && a.pages[0] ? <img src={a.pages[0].dataUrl} alt="" /> : <span className="cv-chip-icon">📄</span>}
               <span className="cv-chip-name">{a.name}</span>
               <button aria-label={`Remove ${a.name}`} onClick={() => setAtts((x) => x.filter((_, i) => i !== k))}>×</button>
             </span>

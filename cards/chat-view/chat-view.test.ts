@@ -102,7 +102,11 @@ describe('labels', () => {
 })
 
 import { buildUserContent } from '../agent-loop/content'
-import { classify, clipText, fitSize, userView } from './index'
+import { filesAsText, fitRequest, textOf } from '../agent-loop/content'
+import { estimateTokens } from '../context-memory/compact'
+import { toAnthropic } from '../model-providers/anthropic'
+import { responsesBody } from '../model-providers/responses'
+import { classify, clipText, fitSize, isScannedPdf, pdfAttachment, userView } from './index'
 
 describe('attachments', () => {
   it('classifies images and text files, and refuses the rest', () => {
@@ -111,7 +115,8 @@ describe('attachments', () => {
     expect(classify('logo.svg', 'image/svg+xml')).toBe('text')
     expect(classify('notes.md')).toBe('text')
     expect(classify('data.bin', 'application/json')).toBe('text')
-    expect(classify('report.pdf', 'application/pdf')).toBe(null)
+    expect(classify('report.pdf', 'application/pdf')).toBe('pdf')
+    expect(classify('archive.zip', 'application/zip')).toBe(null)
   })
 
   it('fits large images in the box without upscaling small ones', () => {
@@ -132,6 +137,60 @@ describe('attachments', () => {
     expect(userView(content)).toEqual({ text: 'Make it look like this', images: ['data:image/png;base64,AA'], files: ['spec "v2".md'] })
     expect(userView(buildUserContent('', [{ kind: 'image', name: 'a.png', dataUrl: 'data:x', width: 1, height: 1 }]))).toEqual({ text: '', images: ['data:x'], files: [] })
     expect(fromMessages([{ role: 'user', content }])[0]).toEqual({ kind: 'user', text: 'Make it look like this', images: ['data:image/png;base64,AA'], files: ['spec "v2".md'] })
+  })
+})
+
+describe('file on disk and PDFs', () => {
+  it('tells the model where the file is, once', () => {
+    const c = buildUserContent('read', [
+      { kind: 'text', name: 'a.md', text: 'body', note: 'cut', path: '/d/a.md' },
+      { kind: 'text', name: 'b.md', text: 'body', note: 'file on disk: /d/b.md', path: '/d/b.md' }
+    ]) as string
+    expect(c).toContain('<attachment name="a.md" note="cut; file on disk: /d/a.md">')
+    expect(c).toContain('<attachment name="b.md" note="file on disk: /d/b.md">')
+    const img = buildUserContent('x', [{ kind: 'image', name: 'shot.png', dataUrl: 'data:x', width: 10, height: 10, path: '/d/shot.png' }])
+    expect(textOf(img)).toContain('Attached image: shot.png (10×10); file on disk: /d/shot.png')
+    expect(userView(img)).toEqual({ text: 'x', images: ['data:x'], files: [] })
+  })
+
+  it('sends a scanned PDF as one image per page and shows it as one file', () => {
+    const pg = { dataUrl: 'data:p', width: 5, height: 5 }
+    const c = buildUserContent('x', [{ kind: 'pages', name: 's.pdf', pages: [pg, pg], total: 9, path: '/d/s.pdf' }, { kind: 'image', name: 'i.png', dataUrl: 'data:i', width: 1, height: 1 }])
+    expect(textOf(c)).toBe('x\nAttached scanned PDF: s.pdf (pages 1-2 of 9, one image per page); file on disk: /d/s.pdf\n[image]\n[image]\nAttached image: i.png (1×1)\n[image]')
+    expect(userView(c)).toEqual({ text: 'x', images: ['data:i'], files: ['s.pdf'] })
+  })
+
+  it('sends a PDF as a file to models that read it and as text to the rest', () => {
+    const data = 'B'.repeat(4000)
+    const content = buildUserContent('read', [{ kind: 'pdf', name: 'r.pdf', data, text: '--- page 1 ---\nhello', pages: 2, path: '/tmp/r.pdf' }])
+    const ms: Message[] = [{ role: 'user', content }]
+    const asText = '<attachment name="r.pdf" note="file on disk: /tmp/r.pdf">\n--- page 1 ---\nhello\n</attachment>'
+    expect(filesAsText(ms)[0].content).toEqual([{ type: 'text', text: 'read' }, { type: 'text', text: asText }])
+    expect((content as any)[1].type).toBe('file')
+    expect(userView(content)).toEqual({ text: 'read', images: [], files: ['r.pdf'] })
+    expect(estimateTokens(ms)).toBeLessThan(4000)
+    expect(JSON.stringify(toAnthropic(ms, { model: 'm' }, '5m'))).toContain('"type":"document","source":{"type":"base64","media_type":"application/pdf","data":"BBBB')
+    const wire = JSON.stringify(responsesBody({ model: 'm', messages: ms } as any, ms))
+    expect(wire).toContain('--- page 1 ---')
+    expect(wire).not.toContain('BBBB')
+    // an old or oversized PDF falls back to its text
+    const later: Message[] = [...ms, { role: 'assistant', content: 'ok' }, { role: 'user', content: [{ type: 'text', text: 'next' }, { type: 'image_url', image_url: { url: 'data:i' } }] }]
+    expect(textOf(fitRequest(later, { maxBytes: 1e9, imageTurns: 1 })[0].content as any)).toBe(`read\n${asText}`)
+    expect(JSON.stringify(fitRequest(later, { maxBytes: 1e9, imageTurns: 1 }))).not.toContain('BBBB')
+    expect(JSON.stringify(fitRequest(ms, { maxBytes: 2000, imageTurns: 0 }))).not.toContain('BBBB')
+    expect(JSON.stringify(fitRequest(ms, { maxBytes: 1e9, imageTurns: 0 }))).toContain('BBBB')
+  })
+
+  it('builds the PDF attachment from what the host extracted', () => {
+    const text = 'A page of ordinary text, long enough to count.'
+    expect(pdfAttachment({ name: 'r.pdf', data: 'QQ', size: 1000, pageTexts: [text, text], path: '/d/r.pdf' }))
+      .toEqual({ kind: 'pdf', name: 'r.pdf', data: 'QQ', text: `--- page 1 ---\n${text}\n\n--- page 2 ---\n${text}`, pages: 2, path: '/d/r.pdf' })
+    // too large or too long: text only
+    expect(pdfAttachment({ name: 'r.pdf', data: 'QQ', size: 9 * 1024 * 1024, pageTexts: [text] })).toEqual({ kind: 'text', name: 'r.pdf', text: `--- page 1 ---\n${text}`, note: '1 page' })
+    expect(pdfAttachment({ name: 'r.pdf', data: 'QQ', size: 1000, pageTexts: Array(21).fill(text) })).toMatchObject({ kind: 'text', note: '21 pages' })
+    // scanned: the host renders the pages
+    expect(isScannedPdf(['', ' 3 '])).toBe(true)
+    expect(pdfAttachment({ name: 's.pdf', data: 'QQ', size: 1000, pageTexts: ['', ''] })).toBe(null)
   })
 })
 

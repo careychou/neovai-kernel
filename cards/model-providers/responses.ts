@@ -1,6 +1,7 @@
 import type { ChatRequest, Delta, Message } from '../agent-loop/types'
 import { outputCap } from './output-caps'
 import { parseSSE } from './sse'
+import { filesAsText } from '../agent-loop/content'
 
 /**
  * OpenAI Responses API (/v1/responses) mapping. Used for Azure deployments that refuse function tools
@@ -8,13 +9,13 @@ import { parseSSE } from './sse'
  */
 export function responsesBody(req: ChatRequest, messages: Message[]): Record<string, unknown> {
   const input: unknown[] = []
-  for (const m of messages) {
+  for (const m of filesAsText(messages)) {
     if (m.role === 'system') input.push({ role: 'system', content: m.content })
     else if (m.role === 'user') {
       input.push({
         role: 'user',
         content: typeof m.content === 'string' ? m.content : m.content.map((p) =>
-          p.type === 'text' ? { type: 'input_text', text: p.text } : { type: 'input_image', image_url: p.image_url.url })
+          p.type === 'image_url' ? { type: 'input_image', image_url: p.image_url.url } : { type: 'input_text', text: p.type === 'text' ? p.text : '' })
       })
     } else if (m.role === 'assistant') {
       if (m.content) input.push({ role: 'assistant', content: m.content })
