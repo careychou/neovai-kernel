@@ -70,7 +70,7 @@ Four ideas hold this together.
 
 | Card | Runs in | Needs | Role in the harness |
 |---|---|---|---|
-| `agent-loop` | Node | none | `Session`: the model/tool loop, queued prompts, stop, `notify` wake-ups, the `AgentEvent` stream, `ToolDef`, `PLAIN_LANGUAGE_RULES`, link rules |
+| `agent-loop` | Node | none | `Session`: the model/tool loop, retries of failed model calls, queued prompts, stop, `notify` wake-ups, the `AgentEvent` stream, `ToolDef`, `PLAIN_LANGUAGE_RULES`, link rules |
 | `model-providers` | Node | agent-loop | `ProviderRouter`: OpenAI-compatible, Azure and Vertex behind one `stream()` |
 | `settings` | Node | agent-loop, model-providers | Settings file with API keys sealed by a `SecretBox` the app supplies (OS keychain on desktop) |
 | `file-tools` | Node | agent-loop | read/write/edit/glob/grep locked to one root, with read-only files |
@@ -345,6 +345,28 @@ sequenceDiagram
   UI-->>C: file watch → main-changed → screen redraws at once
   H->>H: store.saveMessages(chatId, history)
 ```
+
+### 7.5 Model calls that fail
+
+A model call can fail without the model or the request being at fault. The connection to the provider drops partway through a reply, or a request gets no response at all. Node's `fetch` reports the first as `TypeError: terminated` and the second as `TypeError: fetch failed`, and keeps the real reason (`other side closed`, `ECONNRESET`, a timeout) in `cause`. Before 0.21.0 the loop tried such a call once more only when nothing had streamed yet, after 1.5 seconds. A drop mid-reply ended the whole run, with a bare "terminated" message.
+
+Now `callModel` (`cards/agent-loop/loop.ts`, rules in `retry.ts`) works like this:
+
+| What failed | Tried again? |
+|---|---|
+| Connection dropped mid-reply, no response, socket reset, DNS or timeout errors | Yes |
+| HTTP 408, 409, 429 and every 5xx | Yes |
+| A provider error inside the stream that says it is overloaded or rate limited | Yes |
+| Any other 4xx (bad request, auth, too large), a missing key or provider, a bad response body | No: another try would fail the same way |
+
+- **Tries and waits.** Up to four tries, 2, 5 and 10 seconds apart, with ±15% jitter so parallel sub-agents do not retry in step. That covers about 17 seconds of outage. `SessionOptions.retryDelaysMs` changes the waits, and with them the number of tries.
+- **A partial reply is safe to throw away.** The reply is added to the conversation only after it completes, and the tools it asks for run only then, so a retry sends the same messages again. Nothing is duplicated and no tool runs twice.
+- **The view is told.** Each retry emits `retry { attempt, of, delayMs, reason, discarded }`. The `chat-view` `applyEvent` removes the reasoning and text that the failed try streamed (`discarded`) and shows one "Trying again in 2s (try 2 of 4)…" line, which goes away when a reply, a tool call or an error arrives.
+- **Stop works during the wait.** It cancels the run at once.
+- **The final error says why.** After the last try the run fails with, for example, `Lost the connection to the model 4 times in a row. Last error: terminated (other side closed, UND_ERR_SOCKET)`.
+- **Sub-agents and runtime jobs get the same behaviour**, since they run the same loop.
+
+`tests/regression/dropped-connection.test.ts` runs this end to end with the real OpenAI adapter against a local server that closes the socket mid-reply and before replying.
 
 ## 8. Extending without forking: a private card repo
 

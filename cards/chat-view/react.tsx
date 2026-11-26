@@ -138,6 +138,7 @@ export function MessageList({ items, Markdown = Plain, technical = false, links 
           case 'tool': return <ToolRow key={r.callId} t={r} />
           case 'tools': return <ToolGroup key={r.items[0].callId} items={r.items} />
           case 'error': return <div key={i} className="cv-error">{r.text}</div>
+          case 'retry': return <div key={i} className="cv-retry" role="status"><span className="cv-spin" /> {r.text}</div>
         }
       })}
      </MarkdownCtx.Provider>

@@ -74,7 +74,7 @@ For the full design and step-by-step wiring, read [docs/ARCHITECTURE.md](docs/AR
 
 | Card | What it gives you |
 |---|---|
-| `agent-loop` | Model/tool loop, `Session`, tool and event types. A prompt sent while a run is in progress is queued and joins the conversation before the next model call (`send(prompt, attachments, qid)`, `queued`, `unqueue(qid)`). Every tool takes an extra plain-language `intent` (added to its schema, removed before it runs) so chats can say what a step does; `PLAIN_LANGUAGE_RULES` tells an agent to talk to a non-technical user |
+| `agent-loop` | Model/tool loop, `Session`, tool and event types. A prompt sent while a run is in progress is queued and joins the conversation before the next model call (`send(prompt, attachments, qid)`, `queued`, `unqueue(qid)`). Since 0.21.0, a model call that fails for a reason worth another try (a dropped connection such as Node's `terminated` or `fetch failed`, a timeout, 429, 5xx, a provider "overloaded" error) is tried up to four times, 2, 5 and 10 seconds apart, also when part of the reply had already streamed; a `retry` event lets the chat drop the partial reply and show "Trying again…", and the final error names the real cause (`terminated (other side closed, UND_ERR_SOCKET)`). See [Model calls that fail](docs/ARCHITECTURE.md#75-model-calls-that-fail). Every tool takes an extra plain-language `intent` (added to its schema, removed before it runs) so chats can say what a step does; `PLAIN_LANGUAGE_RULES` tells an agent to talk to a non-technical user |
 | `model-providers` | OpenAI-compatible, Azure and Vertex adapters behind one router |
 | `file-tools` | read / write / edit / glob / grep, locked to one root folder |
 | `shell` | Shell command tools, sync and background |

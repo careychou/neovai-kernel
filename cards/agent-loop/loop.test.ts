@@ -117,10 +117,51 @@ describe('agent loop', () => {
     expect(events.some((e) => e.kind === 'error')).toBe(true)
   })
 
-  it('retries once when the model fails before streaming anything', async () => {
-    const { session, requests } = setup([Object.assign(new Error('bad gateway'), { status: 502 }), say('recovered')])
+  it('retries when the model fails before streaming anything', async () => {
+    const { session, requests } = setup([Object.assign(new Error('bad gateway'), { status: 502 }), say('recovered')], { retryDelaysMs: [1, 1, 1] })
     expect(await session.send('hi')).toEqual({ status: 'completed', text: 'recovered' })
     expect(requests).toHaveLength(2)
+  })
+
+  // Node's fetch: a socket closed mid-reply is `TypeError: terminated`, the reason in `cause`.
+  const dropped = () => Object.assign(new TypeError('terminated'), { cause: Object.assign(new Error('other side closed'), { code: 'UND_ERR_SOCKET' }) })
+  const noResponse = () => Object.assign(new TypeError('fetch failed'), { cause: Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }) })
+  /** Streams some reasoning and text, then the connection drops. */
+  const dropMidReply = async function* (): AsyncGenerator<Delta> {
+    yield { type: 'reasoning', text: 'Planning the tests…' }
+    yield { type: 'text', text: 'Half an ans' }
+    throw dropped()
+  }
+
+  it('retries a reply whose connection dropped mid-stream, and keeps only the complete reply', async () => {
+    const steps: any[] = [dropMidReply, say('full answer')]
+    const requests: ChatRequest[] = []
+    const adapter: ModelAdapter = { async *stream(req) { requests.push(structuredClone(req)); const s = steps.shift(); if (typeof s === 'function') yield* s(); else yield* s } }
+    const { session, events } = setup([], { adapter, retryDelaysMs: [1, 1, 1], reasoning: 'medium' })
+    expect(await session.send('hi')).toEqual({ status: 'completed', text: 'full answer' })
+    expect(requests).toHaveLength(2)
+    expect(requests[1].messages).toEqual(requests[0].messages)
+    expect(session.history).toEqual([{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'full answer' }])
+    expect(events.find((e) => e.kind === 'retry')).toMatchObject({ attempt: 2, of: 4, discarded: true, reason: 'terminated (other side closed, UND_ERR_SOCKET)' })
+    expect(events.some((e) => e.kind === 'error')).toBe(false)
+  })
+
+  it('tries four times, then fails with the real cause and the number of tries', async () => {
+    const { session, requests, events } = setup([noResponse(), dropped(), noResponse(), dropped(), say('never')], { retryDelaysMs: [1, 1, 1] })
+    const r = await session.send('hi')
+    expect(r.status).toBe('failed')
+    expect(r.text).toBe('Lost the connection to the model 4 times in a row. Last error: terminated (other side closed, UND_ERR_SOCKET)')
+    expect(requests).toHaveLength(4)
+    expect(events.filter((e) => e.kind === 'retry').map((e: any) => e.attempt)).toEqual([2, 3, 4])
+  })
+
+  it('stop during the wait before a retry cancels at once', async () => {
+    const { session, requests } = setup([dropped(), say('never')], { retryDelaysMs: [60_000] })
+    const run = session.send('hi')
+    await new Promise((r) => setTimeout(r, 20))
+    session.stop()
+    expect(await run).toEqual({ status: 'cancelled', text: 'cancelled' })
+    expect(requests).toHaveLength(1)
   })
 
   it('does not retry a request the provider rejected', async () => {

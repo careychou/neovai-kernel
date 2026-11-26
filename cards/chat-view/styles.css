@@ -3,6 +3,7 @@
 .cv-msg.user { align-self: flex-end; background: var(--panel, #171a21); border: 1px solid var(--line, #272c37); border-radius: 12px; padding: 8px 12px; white-space: pre-wrap; }
 .cv-msg.assistant { align-self: stretch; }
 .cv-plain { white-space: pre-wrap; }
+.cv-retry { display: flex; align-items: center; gap: 6px; color: var(--muted, #8b93a4); font-size: 13px; }
 .cv-error { color: var(--bad, #e5605c); white-space: pre-wrap; }
 
 .cv-thought, .cv-tool { max-width: 780px; }

@@ -89,7 +89,7 @@ No locks are needed. Node runs one thing at a time, and adding to, reading and r
 
 ## 5. Stop and failure
 
-Stop (`session.stop()`) and a failed run (a model error after one retry, or the turn limit) end the same way:
+Stop (`session.stop()`) and a failed run (a model call that failed four times in a row, a model error that a retry would not fix, or the turn limit) end the same way:
 
 1. The history is repaired: a tool call left without a result gets `Error: cancelled`, so the next request is valid.
 2. **The queue is cleared** and `queue_cleared { qids }` is emitted. A prompt written for the state before the interruption may no longer make sense, so it goes back to the user, not to the model.

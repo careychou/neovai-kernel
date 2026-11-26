@@ -64,6 +64,26 @@ describe('applyEvent', () => {
   })
 })
 
+describe('retries', () => {
+  const retry = (discarded: boolean): AgentEvent => ({ kind: 'retry', agentId: 'main', attempt: 2, of: 4, delayMs: 2000, reason: 'terminated (other side closed)', discarded })
+  const streamed: Item[] = [{ kind: 'user', text: 'q' }, { kind: 'reasoning', text: 'plan' }, { kind: 'assistant', text: 'half', live: true }]
+  it('drops what the failed try streamed and says it is trying again', () => {
+    expect(applyEvent(streamed, retry(true))).toEqual([{ kind: 'user', text: 'q' }, { kind: 'reasoning', text: 'plan' }, { kind: 'retry', text: 'terminated (other side closed). Trying again in 2s (try 2 of 4)…' }])
+    const live: Item[] = [{ kind: 'user', text: 'q' }, { kind: 'reasoning', text: 'plan', live: true }]
+    expect(applyEvent(live, retry(true))).toHaveLength(2)
+    expect(applyEvent(streamed, retry(false)).slice(0, 3)).toEqual(streamed)
+  })
+  it('keeps one note at a time and removes it when the reply or an error arrives', () => {
+    const twice = applyEvent(applyEvent(streamed, retry(true)), { ...retry(false), attempt: 3 } as AgentEvent)
+    expect(twice.filter((i) => i.kind === 'retry')).toHaveLength(1)
+    expect(twice.at(-1)).toMatchObject({ kind: 'retry', text: expect.stringContaining('try 3 of 4') })
+    const after = applyEvent(applyEvent(twice, { kind: 'text', agentId: 'main', text: 'ok' }), { kind: 'assistant_done', agentId: 'main', message: { role: 'assistant', content: 'ok' } })
+    expect(after.some((i) => i.kind === 'retry')).toBe(false)
+    expect(applyEvent(twice, { kind: 'error', agentId: 'main', message: 'gave up' }).filter((i) => i.kind === 'retry')).toEqual([])
+    expect(applyEvent(twice, { kind: 'tool_start', agentId: 'main', callId: 'c', name: 'shell', args: '{}' }).some((i) => i.kind === 'retry')).toBe(false)
+  })
+})
+
 describe('queued prompts', () => {
   const q1: QueuedPrompt = { qid: 'q1', text: 'also check 2025', files: ['plan.csv'] }
   const q2: QueuedPrompt = { qid: 'q2', text: 'and 2024' }

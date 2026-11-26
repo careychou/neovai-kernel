@@ -25,6 +25,8 @@ export interface SessionOptions {
   maxOutputTokens?: number
   reasoning?: Reasoning
   history?: Message[]
+  /** Waits between tries of a failed model call; default RETRY_DELAYS_MS (2 s, 5 s, 10 s: four tries). */
+  retryDelaysMs?: number[]
 }
 
 export interface SendResult { status: 'completed' | 'failed' | 'cancelled' | 'queued'; text: string }
@@ -91,7 +93,7 @@ export class Session {
           tools: read(this.o.tools), signal: controller.signal,
           maxTurns: () => this.o.maxTurns ?? 50, maxTokens: () => this.o.maxOutputTokens ?? 0, reasoning: this.o.reasoning ?? 'medium',
           ctx: { cwd: this.o.cwd, depth: 0, hooks, gate: this.o.gate, services: this.o.services ?? {} },
-          drainInput: () => this.drainQueue(),
+          drainInput: () => this.drainQueue(), retryDelaysMs: this.o.retryDelaysMs,
           drainNotifications: () => this.notes.splice(0)
         }, this.messages)
       } while (this.queue.length || this.notes.length)

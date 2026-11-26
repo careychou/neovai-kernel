@@ -8,6 +8,8 @@ export type Item =
   | { kind: 'assistant'; text: string; live?: boolean }
   | { kind: 'tool'; callId: string; name: string; args: string; output?: string; ok?: boolean; agent?: SubAgentView }
   | { kind: 'error'; text: string }
+  /** A model call is being tried again. Shown while it waits; removed once a reply completes. */
+  | { kind: 'retry'; text: string }
 
 export type ToolItem = Extract<Item, { kind: 'tool' }>
 
@@ -100,15 +102,22 @@ export function applyEvent(items: Item[], e: AgentEvent): Item[] {
       if (last?.kind === 'assistant' && last.live) return [...items.slice(0, -1), { ...last, text: last.text + e.text }]
       return [...endThinking(items), { kind: 'assistant', text: e.text, live: true }]
     }
+    case 'retry': {
+      // Drop what the failed try streamed (it never reached the conversation) and any earlier retry note.
+      let cut = items.length
+      while (cut > 0 && (items[cut - 1].kind === 'retry' || (e.discarded && (items[cut - 1].kind === 'reasoning' || items[cut - 1].kind === 'assistant') && (items[cut - 1] as { live?: boolean }).live))) cut--
+      const secs = Math.max(1, Math.round(e.delayMs / 1000))
+      return [...items.slice(0, cut), { kind: 'retry', text: `${e.reason}. Trying again in ${secs}s (try ${e.attempt} of ${e.of})…` }]
+    }
     case 'assistant_done':
     case 'agent_end':
-      return settle(items)
+      return settle(items).filter((i) => i.kind !== 'retry')
     case 'tool_start':
-      return [...settle(items), { kind: 'tool', callId: e.callId, name: e.name, args: e.args }]
+      return [...settle(items).filter((i) => i.kind !== 'retry'), { kind: 'tool', callId: e.callId, name: e.name, args: e.args }]
     case 'tool_end':
       return items.map((it) => (it.kind === 'tool' && it.callId === e.callId ? { ...it, output: e.output, ok: e.ok } : it))
     case 'error':
-      return [...settle(items), { kind: 'error', text: e.message }]
+      return [...settle(items).filter((i) => i.kind !== 'retry'), { kind: 'error', text: e.message }]
     default:
       return items
   }
