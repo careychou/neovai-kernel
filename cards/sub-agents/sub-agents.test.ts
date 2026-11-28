@@ -77,6 +77,34 @@ describe('sub-agents', () => {
     expect(peak).toBe(2)
   })
 
+  it('runs at most maxConcurrency sub-agents at once, tools included, and queues the rest', async () => {
+    let live = 0, peak = 0, done = 0
+    const slow: ToolDef = { name: 'slow', description: 'Slow work', parameters: { type: 'object', properties: {} }, run: async () => { live++; peak = Math.max(peak, live); await new Promise((r) => setTimeout(r, 15)); live--; done++; return 'ok' } }
+    const { session } = setup((req) => {
+      if (isMain(req)) return toolResults(req).length ? say(`all ${toolResults(req).length}`) : call(...Array.from({ length: 10 }, (_, i): [string, unknown] => ['task', { prompt: `s${i}` }]))
+      return toolResults(req).length ? say('x') : call(['slow', {}])
+    }, { tools: [slow] })
+    session.semaphore.setMax(4)
+    expect((await session.send('go')).text).toBe('all 10')
+    expect(peak).toBe(4)
+    expect(done).toBe(10)
+  })
+
+  it('cancels sub-agents still queued for a place when the user stops', async () => {
+    // The running sub-agent waits in a tool (not a model call), so the main agent can still answer.
+    const hang: ToolDef = { name: 'hang', description: 'Waits', parameters: { type: 'object', properties: {} }, run: (_a, ctx) => new Promise((_r, j) => { ctx.signal.addEventListener('abort', () => j(new Error('aborted')), { once: true }) }) }
+    const { session, subs } = setup((req) => {
+      if (isMain(req)) return toolResults(req).length ? say('ok') : call(...['a', 'b', 'c'].map((p): [string, unknown] => ['task', { prompt: p, mode: 'background' }]))
+      return call(['hang', {}])
+    }, { tools: [hang] })
+    session.semaphore.setMax(1)
+    await session.send('go')
+    expect(subs.running()).toBe(3)
+    subs.cancelAll()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(subs.list().map((a) => a.status)).toEqual(['cancelled', 'cancelled', 'cancelled'])
+  })
+
   it('runs a background sub-agent, then wakes the idle main agent with a notice', async () => {
     let release!: () => void
     const gate = new Promise<void>((r) => { release = r })

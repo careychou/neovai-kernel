@@ -50,7 +50,7 @@ export class Session {
   }
 
   get isBusy() { return this.busy }
-  /** The model-call limiter. Sub-agents share it so the whole agent tree stays within `maxConcurrency`. */
+  /** The `maxConcurrency` limiter. Sub-agents share it for model calls, and its limit also caps how many of them run at once. */
   get semaphore() { return this.sem }
   get history(): Message[] { return this.messages.slice(1) }
   /** Prompts sent with a `qid` that are still waiting to join the conversation, in order. For a view that redraws them after a reload. */

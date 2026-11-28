@@ -49,7 +49,10 @@ export interface SubAgentOptions {
   reasoning?: Lazy<Reasoning>
   /** Set false for a one-shot run that ends with its answer: every sub-agent then runs sync, and `read_agent` is not offered. */
   background?: boolean
-  /** Model-call limiter shared with the main agent. `attach(session)` sets it to the session's. */
+  /**
+   * The `maxConcurrency` limiter shared with the main agent; `attach(session)` sets it to the session's. Its limit
+   * caps two things, as in the desktop: model calls in flight, and how many of the main agent's sub-agents run at once.
+   */
   sem?: Semaphore
   /** Delivers a notice to the main agent. `attach(session)` sets it to `session.notify`. */
   notify?: (text: string) => void
@@ -78,8 +81,10 @@ const fmt = (a: SubAgentInfo) =>
 /**
  * The agent tree of one conversation. Gives the main agent `task`, `read_agent` and `list_agents`:
  * - `task` starts a sub-agent with only the prompt it is given; the parent gets only its final answer.
- * - Several `task` calls in one reply run in parallel (the loop runs tool calls together), bounded by the shared semaphore,
- *   which is held only while a model streams, so nested agents never deadlock.
+ * - Several `task` calls in one reply run in parallel (the loop runs tool calls together), up to `maxConcurrency` at once:
+ *   a 30-way fan-out at 20 runs 20 and queues 10, which start as others end. A sub-agent keeps its place for its whole
+ *   run, tools included. Only the main agent's own sub-agents take a place, so nested ones never deadlock; model calls
+ *   across the whole tree share the same limit.
  * - `mode: "background"` returns an id at once; when the sub-agent ends its parent gets a <system_notification>,
  *   and an idle main agent wakes up to handle it.
  * - Stopping the parent stops its sub-agents; `attach(session)` also stops background ones when the user presses Stop.
@@ -88,6 +93,8 @@ export class SubAgents {
   private entries = new Map<string, Entry>()
   private seq = 0
   private detach: (() => void) | null = null
+  /** Places for running sub-agents, sized to the shared limiter. */
+  private slots: Semaphore | null = null
 
   constructor(private o: SubAgentOptions) {}
 
@@ -164,8 +171,12 @@ export class SubAgents {
     hooks.onEvent({ kind: 'agent_start', agentId: id, parentId: ctx.agentId, name, mode, prompt: a.prompt, ...(ctx.callId ? { callId: ctx.callId } : {}), ...(a.description ? { description: a.description } : {}) })
 
     const sem = this.o.sem ?? (this.o.sem = new Semaphore(4))
+    const top = depth === 1
+    if (top) { if (this.slots) this.slots.setMax(sem.limit); else this.slots = new Semaphore(sem.limit) }
     entry.done = (async () => {
+      let free: (() => void) | undefined
       try {
+        if (top) free = await this.slots!.acquire(controller.signal)
         info.finalText = await runLoop({
           agentId: id, model: read(this.o.model), adapter: this.o.adapter, sem, hooks, tools,
           signal: controller.signal,
@@ -178,6 +189,7 @@ export class SubAgents {
         info.status = e instanceof AbortedError || controller.signal.aborted ? 'cancelled' : 'failed'
         info.finalText = info.status === 'cancelled' ? 'cancelled' : (e?.message ?? String(e))
       } finally {
+        free?.()
         ctx.signal.removeEventListener('abort', onParentAbort)
         hooks.onEvent({ kind: 'agent_end', agentId: id, status: info.status, finalText: info.finalText })
         if (mode === 'background' && info.status !== 'cancelled') this.deliver(info)

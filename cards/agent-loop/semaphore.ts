@@ -3,6 +3,9 @@ export class Semaphore {
   private active = 0
   constructor(private max: number) {}
 
+  /** The current limit. */
+  get limit() { return this.max }
+
   /** Changes the limit in place: raising it starts queued callers now, lowering it lets running ones finish. */
   setMax(n: number) {
     this.max = Math.max(1, n)
